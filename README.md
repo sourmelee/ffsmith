@@ -47,3 +47,9 @@ docs/       ASSET_PIPELINE.md + per-subsystem specs
 ```
 
 **Clean-room note:** FFSmith ships no game assets. It loads content you bake locally from your own `main.obb` via the toolkit.
+
+## Credits
+
+FFSmith is **co-authored using Claude Cowork** (Anthropic), developed alongside the
+FFD/FFL Toolkit (`../Python`) as a clean-room reimplementation. See `ENGINE_RE_ROADMAP.md` for the design and `docs/ASSET_PIPELINE.md` for the
+toolkit↔engine asset contract.
