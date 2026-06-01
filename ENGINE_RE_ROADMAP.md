@@ -219,7 +219,7 @@ Player walks a real map with correct tile collision, map-edge behavior (wrap vs.
 | # | Milestone | Gate |
 |---|---|---|
 | M0 | Empty SDL2 loop + textured quad | window runs, draws |
-| M1 | Static map render from OBB | pixel-match toolkit MapTab |
+| M1 | **✅ Static map render** from baked bundle | byte-identical to toolkit (g0_p0_m101, m501) |
 | M2 | **Field walkable** (Part 4) | collision + camera correct on 2 maps |
 | M3 | NPCs + triggers + event-VM live on the field | NPC walk, talk, warp |
 | M4 | Game state machine + scene dispatch (`ChangeMainFunc`) | title → field → menu transitions |
@@ -242,4 +242,4 @@ M2 is the immediate objective; everything in Part 3 precedes it.
 
 ---
 
-*Status 2026-06-01: M0 ✅ — FFSmith C++17 SDL2 host + fixed-timestep loop built clean and verified headless. Next: M1 — static map render from a baked `.ffmap` (see `docs/ASSET_PIPELINE.md`), then M2 — field walkable.*
+*Status 2026-06-01: M0 ✅ + M1 ✅ — FFSmith loads toolkit-baked `.ffmap`/`.tex` and composes maps **byte-identical** to the toolkit (verified g0_p0_m101, g0_p0_m501). Toolkit baker: `python ffd_toolkit.py --bake-ffsmith`. Next: M2 — field movement/collision/camera (field walkable).*

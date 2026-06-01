@@ -7,7 +7,8 @@ Companion to the Python **FFD/FFL Toolkit** (`../Python/`): the toolkit bakes ve
 ## Status
 
 - **M0 — host + main loop: ✅ done.** SDL2 window, fixed-timestep logic loop, input edge-detection, headless `--frames` mode. Verified compiling clean (`-Wall -Wextra -Wpedantic`) and running headless (120 ticks, clean exit).
-- **Next:** M1 — static map render from a baked `.ffmap`; then M2 — field movement / collision / camera.
+- **M1 — static map render: ✅ done.** Toolkit bakes `.ffmap` + `.tex`; FFSmith loads and composes them. Verified **byte-identical** (100% exact pixels, max channel diff 0) to the toolkit render on a 1-layer map (g0_p0_m101) and a 2-layer / dual-slot map (g0_p0_m501).
+- **Next:** M2 — field movement / collision / camera.
 
 Full plan and the reverse-engineering map: **`ENGINE_RE_ROADMAP.md`**.
 

@@ -21,7 +21,11 @@ file(GLOB_RECURSE FFSMITH_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/*.cp
 
 add_executable(ffsmith ${FFSMITH_SOURCES})
 target_include_directories(ffsmith PRIVATE ${CMAKE_SOURCE_DIR}/src ${SDL2_INCLUDE_DIRS})
-target_compile_options(ffsmith PRIVATE -Wall -Wextra -Wpedantic)
+if(MSVC)
+  target_compile_options(ffsmith PRIVATE /W4)
+else()
+  target_compile_options(ffsmith PRIVATE -Wall -Wextra -Wpedantic)
+endif()
 
 if(TARGET SDL2::SDL2)
   target_link_libraries(ffsmith PRIVATE SDL2::SDL2)
