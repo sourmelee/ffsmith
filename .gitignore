@@ -1,0 +1,21 @@
+# Build output
+/build/
+build*/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+
+# Object / binary artifacts
+*.o
+*.obj
+*.a
+*.so
+*.dll
+*.exe
+
+# Baked assets (generated locally from the user's own main.obb — never committed)
+/assets/baked/
+
+.cache/
+.DS_Store
