@@ -43,7 +43,9 @@ Texture load_tex(const std::string& path) {
 FfMap load_ffmap(const std::string& path) {
     FfMap m;
     auto buf = read_file(path);
-    if (buf.size() < 22 || std::memcmp(buf.data(), "FFM0", 4) != 0) return m;
+    // Accept FFM0 (no collision) and FFM1 (with passability grid).
+    if (buf.size() < 22 || std::memcmp(buf.data(), "FFM", 3) != 0) return m;
+    const bool has_pass_block = (buf[3] == '1');
     size_t o = 4;
     int w  = rd_u16(&buf[o]); o += 2;
     int h  = rd_u16(&buf[o]); o += 2;
@@ -56,7 +58,7 @@ FfMap load_ffmap(const std::string& path) {
     m.w = w; m.h = h; m.n_layers = nl;
     size_t cells = (size_t)w * h;
     for (int L = 0; L < nl; ++L) {
-        if (o + cells * 2 > buf.size()) return m;  // truncated
+        if (o + cells * 2 > buf.size()) return m;
         std::vector<uint16_t> layer;
         layer.reserve(cells);
         for (size_t i = 0; i < cells; ++i) { layer.push_back(rd_u16(&buf[o])); o += 2; }
@@ -64,7 +66,12 @@ FfMap load_ffmap(const std::string& path) {
     }
     if (o + 4 <= buf.size()) {
         uint32_t elen = rd_u32(&buf[o]); o += 4;
-        if (o + elen <= buf.size()) m.event.assign(buf.begin() + o, buf.begin() + o + elen);
+        if (o + elen <= buf.size()) { m.event.assign(buf.begin() + o, buf.begin() + o + elen); o += elen; }
+    }
+    if (has_pass_block && o < buf.size()) {
+        uint8_t has_pass = buf[o++];
+        if (has_pass && o + cells <= buf.size())
+            m.pass.assign(buf.begin() + o, buf.begin() + o + cells);
     }
     return m;
 }

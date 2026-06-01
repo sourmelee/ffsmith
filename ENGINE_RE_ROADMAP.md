@@ -220,7 +220,7 @@ Player walks a real map with correct tile collision, map-edge behavior (wrap vs.
 |---|---|---|
 | M0 | Empty SDL2 loop + textured quad | window runs, draws |
 | M1 | **✅ Static map render** from baked bundle | byte-identical to toolkit (g0_p0_m101, m501) |
-| M2 | **Field walkable** (Part 4) | collision + camera correct on 2 maps |
+| M2 | **✅ Field walkable** (Part 4) | walk + follow-camera + bounds + `capk.dat` wall collision (verified g0_p0_m501) |
 | M3 | NPCs + triggers + event-VM live on the field | NPC walk, talk, warp |
 | M4 | Game state machine + scene dispatch (`ChangeMainFunc`) | title → field → menu transitions |
 | M5 | Menu system (`MenuClass`) | item/equip/status menus |
@@ -242,4 +242,4 @@ M2 is the immediate objective; everything in Part 3 precedes it.
 
 ---
 
-*Status 2026-06-01: M0 ✅ + M1 ✅ — FFSmith loads toolkit-baked `.ffmap`/`.tex` and composes maps **byte-identical** to the toolkit (verified g0_p0_m101, g0_p0_m501). Toolkit baker: `python ffd_toolkit.py --bake-ffsmith`. Next: M2 — field movement/collision/camera (field walkable).*
+*Status 2026-06-01: M0 ✅ + M1 ✅ — FFSmith loads toolkit-baked `.ffmap`/`.tex` and composes maps **byte-identical** to the toolkit (verified g0_p0_m101, g0_p0_m501). Toolkit baker: `python ffd_toolkit.py --bake-ffsmith`. M2 ✅ incl. **`capk.dat` wall collision** (chip-attribute file decoded; FFM1 bakes a per-cell pass grid). Next: M3 — NPCs, triggers and dialogue via the event-script VM.*

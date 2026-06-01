@@ -8,7 +8,9 @@ Companion to the Python **FFD/FFL Toolkit** (`../Python/`): the toolkit bakes ve
 
 - **M0 — host + main loop: ✅ done.** SDL2 window, fixed-timestep logic loop, input edge-detection, headless `--frames` mode. Verified compiling clean (`-Wall -Wextra -Wpedantic`) and running headless (120 ticks, clean exit).
 - **M1 — static map render: ✅ done.** Toolkit bakes `.ffmap` + `.tex`; FFSmith loads and composes them. Verified **byte-identical** (100% exact pixels, max channel diff 0) to the toolkit render on a 1-layer map (g0_p0_m101) and a 2-layer / dual-slot map (g0_p0_m501).
-- **Next:** M2 — field movement / collision / camera.
+- **M2 — field movement + camera: ✅ done.** Walk a player (arrows/WASD) around a baked map; smooth one-tile-stepped movement, facing, and a follow-camera clamped to map bounds. Verified by deterministic headless `--walk` traces (movement, bounds-block, facing).
+- **M2.1 — wall collision: ✅ done.** Decoded `capk.dat` (per-tileset chip attributes); the toolkit bakes a per-cell passability grid (FFM1) and `Field::isSolid` blocks walls/objects. Verified: solids overlay exactly on walls & furniture; the player stops at interior walls.
+- **Next:** M3 — NPCs, triggers and dialogue via the already-decoded event-script VM.
 
 Full plan and the reverse-engineering map: **`ENGINE_RE_ROADMAP.md`**.
 
@@ -34,6 +36,35 @@ On Windows: install SDL2 (e.g. `vcpkg install sdl2`, or the SDL2 development pac
 ```
 
 Arrows / WASD = move · Z / Space = confirm · X = cancel · Enter = menu · Esc = quit.
+
+## Running a baked map
+
+First bake a bundle with the toolkit (creates `maps/` + `tex/` + `manifest.json`):
+
+```sh
+python ffd_toolkit.py --bake-ffsmith out_bundle --proper ../Android/proper_obb
+```
+
+Then point FFSmith at it. If `maps/` and `tex/` sit next to `ffsmith.exe`, the
+bundle defaults to the executable's folder, so just pass a map:
+
+```sh
+ffsmith --map g0_p0_m501            # bundle = exe folder by default
+ffsmith --bundle out_bundle --map g0_p0_m501
+```
+
+**Map keys** are `g{group}_p{pack}_m{id}` (note the `p`): e.g. `g0_p0_m501`, not
+`g0_0_m501`. List what you have with `ls maps` / `dir maps` and drop the
+`.ffmap` suffix. Good first maps: `g0_p0_m501` (small interior), `g0_p0_m101`.
+
+A window opens; **arrows / WASD** walk the player (yellow marker), the camera
+follows, **Esc** quits. Big maps make big windows — use `--scale 1` or `2`.
+
+Headless options (no window): `--shot out.tex` writes the composed map; `--walk URDL...` prints the player's tile path for a scripted move sequence.
+
+On Windows, keep `SDL2.dll` next to `ffsmith.exe`.
+
+---
 
 ## Source layout
 

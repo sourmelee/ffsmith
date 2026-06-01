@@ -16,7 +16,7 @@ compile_commands.json
 
 # Baked assets (generated locally from the user's own main.obb — never committed)
 /assets/baked/
-
+/testbed
 .cache/
 .DS_Store
 .vs/
