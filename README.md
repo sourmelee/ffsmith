@@ -10,7 +10,9 @@ Companion to the Python **FFD/FFL Toolkit** (`../Python/`): the toolkit bakes ve
 - **M1 — static map render: ✅ done.** Toolkit bakes `.ffmap` + `.tex`; FFSmith loads and composes them. Verified **byte-identical** (100% exact pixels, max channel diff 0) to the toolkit render on a 1-layer map (g0_p0_m101) and a 2-layer / dual-slot map (g0_p0_m501).
 - **M2 — field movement + camera: ✅ done.** Walk a player (arrows/WASD) around a baked map; smooth one-tile-stepped movement, facing, and a follow-camera clamped to map bounds. Verified by deterministic headless `--walk` traces (movement, bounds-block, facing).
 - **M2.1 — wall collision: ✅ done.** Decoded `capk.dat` (per-tileset chip attributes); the toolkit bakes a per-cell passability grid (FFM1) and `Field::isSolid` blocks walls/objects. Verified: solids overlay exactly on walls & furniture; the player stops at interior walls.
-- **Next:** M3 — NPCs, triggers and dialogue via the already-decoded event-script VM.
+- **M3 (core) — event VM + NPCs + dialogue: ✅ done.** The baker emits structured events (FFM2); the engine runs an event-script VM, places NPCs (solid), and face-to-talk (Z/Enter) opens a placeholder dialogue box from the script's messages. Verified headless (`--events`): NPC at (4,6) -> messages 170-175.
+- **M3b (sprites) — real field sprites: ✅ done.** Player + NPCs render as actual `fldchr` character sprites (standing frame, feet-aligned, transparent), baked into the bundle (`sprites/*.tex`). Verified in-engine via `--fieldshot`. Per-facing + walk animation is the next refinement.
+- **Next:** step-on triggers + cross-map warps (boot conditions + `MapChange`); per-facing/walk sprite frames; font/text for real dialogue.
 
 Full plan and the reverse-engineering map: **`ENGINE_RE_ROADMAP.md`**.
 

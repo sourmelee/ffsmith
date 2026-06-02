@@ -31,7 +31,7 @@ if(TARGET SDL2::SDL2)
   target_link_libraries(ffsmith PRIVATE SDL2::SDL2)
 else()
   target_link_libraries(ffsmith PRIVATE ${SDL2_LIBRARIES})
-
+endif()
 if(MSVC)
   target_compile_definitions(ffsmith PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()

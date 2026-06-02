@@ -45,7 +45,7 @@ FfMap load_ffmap(const std::string& path) {
     auto buf = read_file(path);
     // Accept FFM0 (no collision) and FFM1 (with passability grid).
     if (buf.size() < 22 || std::memcmp(buf.data(), "FFM", 3) != 0) return m;
-    const bool has_pass_block = (buf[3] == '1');
+    const bool has_pass_block = (buf[3] >= '1');
     size_t o = 4;
     int w  = rd_u16(&buf[o]); o += 2;
     int h  = rd_u16(&buf[o]); o += 2;
@@ -70,8 +70,28 @@ FfMap load_ffmap(const std::string& path) {
     }
     if (has_pass_block && o < buf.size()) {
         uint8_t has_pass = buf[o++];
-        if (has_pass && o + cells <= buf.size())
+        if (has_pass && o + cells <= buf.size()) {
             m.pass.assign(buf.begin() + o, buf.begin() + o + cells);
+            o += cells;
+        }
+    }
+    if (buf[3] >= '2' && o + 2 <= buf.size()) {  // FFM2 events block
+        int ne = rd_u16(&buf[o]); o += 2;
+        for (int e = 0; e < ne; ++e) {
+            if (o + 9 > buf.size()) break;
+            Event ev;
+            ev.x = buf[o]; ev.y = buf[o+1]; ev.type = buf[o+2]; ev.boot = buf[o+3];
+            ev.img = rd_i16(&buf[o+4]); ev.var = buf[o+6];
+            int ns = rd_u16(&buf[o+7]); o += 9;
+            for (int s = 0; s < ns; ++s) {
+                if (o + 2 > buf.size()) break;
+                int len = rd_u16(&buf[o]); o += 2;
+                if (o + (size_t)len > buf.size()) break;
+                ev.scripts.emplace_back(buf.begin() + o, buf.begin() + o + len);
+                o += len;
+            }
+            m.events.push_back(std::move(ev));
+        }
     }
     return m;
 }

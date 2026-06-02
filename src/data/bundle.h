@@ -7,17 +7,27 @@ namespace ffsmith {
 
 struct Texture {
     int w = 0, h = 0;
-    std::vector<uint8_t> rgba;  // w*h*4
+    std::vector<uint8_t> rgba;
     bool valid() const { return w > 0 && h > 0 && rgba.size() == (size_t)w * h * 4; }
+};
+
+// A field event: NPC, object, or trigger (from the map chunk's event pack).
+struct Event {
+    int x = 0, y = 0;          // tile position
+    int type = 0;              // 0 = chara/NPC, 1 = trigger/auto (header[7])
+    int boot = 0;              // boot/appear condition (header[8])
+    int img = -1, var = 0;     // chara sprite id + variant
+    std::vector<std::vector<uint8_t>> scripts;  // length-split bytecode blocks
 };
 
 struct FfMap {
     int w = 0, h = 0, n_layers = 0;
     int mc_slot0 = -1, var_slot0 = 0;
     int mc_slot1 = -1, var_slot1 = 0;
-    std::vector<std::vector<uint16_t>> layers;  // [layer][cell]
-    std::vector<uint8_t> event;                 // raw event-script region
-    std::vector<uint8_t> pass;                  // per-cell 4-dir pass nibble (0 = solid); empty if none
+    std::vector<std::vector<uint16_t>> layers;
+    std::vector<uint8_t> event;     // raw event region (legacy; events[] is structured)
+    std::vector<uint8_t> pass;      // per-cell 4-dir pass nibble (0 = solid)
+    std::vector<Event> events;      // structured NPCs/triggers (FFM2)
     bool valid() const { return w > 0 && h > 0; }
 };
 
