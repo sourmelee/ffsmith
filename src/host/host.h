@@ -47,7 +47,7 @@ private:
     void render();
     bool ensureMapTexture(const Texture& img);
     SDL_Texture* spriteTex(int img, int var, int& w, int& h);  // cached fldchr sheet
-    bool drawSprite(int img, int var, int lx, int ly, int tile);
+    bool drawSprite(int img, int var, int facing, int lx, int ly, int tile);
 
     HostConfig    cfg_;
     SDL_Window*   window_     = nullptr;

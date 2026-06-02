@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
     HostConfig cfg;
     std::string bundle, map, shot, walk, fieldshot;
     bool events_mode = false;
-    int playerImg = -1, playerVar = 0;
+    int playerImg = -1, playerVar = 0, face = -1;
     int startCol = -1, startRow = -1;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
@@ -90,6 +90,7 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--events")) events_mode = true;
         else if (!std::strcmp(a, "--fieldshot")) fieldshot = takeStr(argc, argv, i, "");
         else if (!std::strcmp(a, "--player-img")) playerImg = takeInt(argc, argv, i, playerImg);
+        else if (!std::strcmp(a, "--face")) face = takeInt(argc, argv, i, face);
         else if (!std::strcmp(a, "--player")) { const char* v = takeStr(argc, argv, i, ""); std::sscanf(v, "%d,%d", &startCol, &startRow); }
         else if (!std::strcmp(a, "--frames")) cfg.max_frames    = takeInt(argc, argv, i, cfg.max_frames);
         else if (!std::strcmp(a, "--scale"))  cfg.scale         = takeInt(argc, argv, i, cfg.scale);
@@ -151,6 +152,7 @@ int main(int argc, char** argv) {
     host.setBundleDir(bundle);
     host.setPlayerSprite(playerImg, playerVar);
     host.setField(&field, fb);
+    if (face >= 0) { InputState in; in.held = (uint32_t)(face==0?BTN_DOWN:face==1?BTN_UP:face==2?BTN_LEFT:BTN_RIGHT); field.update(in); }
     if (!fieldshot.empty()) {
         bool ok = host.shotField(fieldshot);
         std::printf("[FFSmith] field shot %s -> %s\n", ok ? "ok" : "FAILED", fieldshot.c_str());
