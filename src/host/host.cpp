@@ -2,6 +2,7 @@
 
 #include <SDL.h>
 #include <cstdio>
+#include <string>
 #include "field/field.h"
 #include "field/event_vm.h"
 
@@ -11,6 +12,7 @@ Host::Host(const HostConfig& cfg) : cfg_(cfg) {}
 
 Host::~Host() {
     for (auto& kv : sprites_) if (kv.second) SDL_DestroyTexture(kv.second);
+    if (fontTex_)  SDL_DestroyTexture(fontTex_);
     if (map_tex_)  SDL_DestroyTexture(map_tex_);
     if (renderer_) SDL_DestroyRenderer(renderer_);
     if (window_)   SDL_DestroyWindow(window_);
@@ -112,6 +114,54 @@ bool Host::drawSprite(int img, int var, int facing, int animCol, int lx, int ly,
     return true;
 }
 
+bool Host::loadText(const std::string& dir) {
+    messages_ = load_messages(dir + "/text/messages.bin");
+    Font f = load_font(dir + "/text/font.tex", dir + "/text/font.meta");
+    if (f.valid() && renderer_) {
+        if (fontTex_) SDL_DestroyTexture(fontTex_);
+        fontTex_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC,
+                                     f.atlas.w, f.atlas.h);
+        if (fontTex_) {
+            SDL_UpdateTexture(fontTex_, nullptr, f.atlas.rgba.data(), f.atlas.w * 4);
+            SDL_SetTextureBlendMode(fontTex_, SDL_BLENDMODE_BLEND);
+        }
+        fcw_ = f.cw; fch_ = f.ch; fcols_ = f.cols; ffirst_ = f.first;
+    }
+    std::printf("[FFSmith] text: %zu messages, font %s\n",
+                messages_.size(), fontTex_ ? "loaded" : "missing");
+    return !messages_.empty();
+}
+
+// Word-wrapped bitmap text from the baked atlas. Honors '\n'; wraps whole words
+// at maxChars; unknown bytes (incl. multibyte UTF-8) render as '?'.
+void Host::drawText(int x, int y, const std::string& s, int maxChars, uint8_t r, uint8_t g, uint8_t b) {
+    if (!fontTex_ || fcw_ <= 0 || maxChars < 1) return;
+    SDL_SetTextureColorMod(fontTex_, r, g, b);
+    int cx = 0, cy = 0;
+    auto put = [&](unsigned char c) {
+        if (c < (unsigned)ffirst_ || c >= (unsigned)(ffirst_ + 95)) c = '?';
+        int gi = (int)c - ffirst_;
+        SDL_Rect src{ (gi % fcols_) * fcw_, (gi / fcols_) * fch_, fcw_, fch_ };
+        SDL_Rect dst{ x + cx * fcw_, y + cy * fch_, fcw_, fch_ };
+        SDL_RenderCopy(renderer_, fontTex_, &src, &dst);
+    };
+    size_t i = 0;
+    while (i < s.size()) {
+        char ch = s[i];
+        if (ch == '\n') { cx = 0; ++cy; ++i; continue; }
+        if (ch == ' ')  { if (++cx >= maxChars) { cx = 0; ++cy; } ++i; continue; }
+        size_t j = i;
+        while (j < s.size() && s[j] != ' ' && s[j] != '\n') ++j;
+        int wl = (int)(j - i);
+        if (cx + wl > maxChars && wl <= maxChars) { cx = 0; ++cy; }
+        for (size_t k = i; k < j; ++k) {
+            if (cx >= maxChars) { cx = 0; ++cy; }
+            put((unsigned char)s[k]); ++cx;
+        }
+        i = j;
+    }
+}
+
 static uint32_t keyToButton(SDL_Keycode k) {
     switch (k) {
         case SDLK_UP: case SDLK_w: return BTN_UP;
@@ -210,10 +260,17 @@ void Host::render() {
         }
 
         if (field_->inDialogue()) {
-            SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 220);
-            SDL_Rect bar{ 4, vh - 46, vw - 8, 42 }; SDL_RenderFillRect(renderer_, &bar);
-            SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 255);
-            SDL_RenderDrawRect(renderer_, &bar);
+            const int boxH = 68, by = vh - boxH - 4, bx = 6, bw = vw - 12;
+            SDL_SetRenderDrawColor(renderer_, 12, 16, 48, 235);
+            SDL_Rect box{ bx, by, bw, boxH }; SDL_RenderFillRect(renderer_, &box);
+            SDL_SetRenderDrawColor(renderer_, 235, 235, 255, 255);
+            SDL_RenderDrawRect(renderer_, &box);
+            const int id = field_->dialogueMsg();
+            auto it = messages_.find(id);
+            std::string txt = (it != messages_.end()) ? it->second
+                                                       : ("[msg " + std::to_string(id) + "]");
+            const int maxChars = fcw_ > 0 ? (bw - 12) / fcw_ : 30;
+            drawText(bx + 6, by + 6, txt, maxChars, 255, 255, 255);
         }
         SDL_RenderPresent(renderer_);
         return;

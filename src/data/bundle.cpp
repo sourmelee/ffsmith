@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <unordered_map>
 
 namespace ffsmith {
 
@@ -125,6 +126,34 @@ std::string find_map_key(const std::string& bundleDir, int mapId) {
         }
     }
     return "";
+}
+
+std::unordered_map<int, std::string> load_messages(const std::string& path) {
+    std::unordered_map<int, std::string> out;
+    auto buf = read_file(path);
+    if (buf.size() < 8 || std::memcmp(buf.data(), "FMSG", 4) != 0) return out;
+    uint32_t n = rd_u32(&buf[4]);
+    size_t o = 8;
+    for (uint32_t i = 0; i < n && o + 8 <= buf.size(); ++i) {
+        uint32_t id = rd_u32(&buf[o]);
+        uint32_t len = rd_u32(&buf[o + 4]);
+        o += 8;
+        if (o + len > buf.size()) break;
+        out[(int)id] = std::string((const char*)&buf[o], len);
+        o += len;
+    }
+    return out;
+}
+
+Font load_font(const std::string& texPath, const std::string& metaPath) {
+    Font f;
+    f.atlas = load_tex(texPath);
+    auto m = read_file(metaPath);
+    if (m.size() >= 14 && std::memcmp(m.data(), "FMET", 4) == 0) {
+        f.cw = rd_u16(&m[4]); f.ch = rd_u16(&m[6]);
+        f.cols = rd_u16(&m[8]); f.first = rd_u16(&m[10]);
+    }
+    return f;
 }
 
 }  // namespace ffsmith

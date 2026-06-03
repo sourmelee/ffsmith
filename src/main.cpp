@@ -76,6 +76,7 @@ int main(int argc, char** argv) {
     std::string bundle, map, shot, walk, fieldshot;
     bool events_mode = false;
     int playerImg = -1, playerVar = 0, face = -1, startCol = -1, startRow = -1;
+    int openMsg = -1, openCnt = 1;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
         if      (!std::strcmp(a, "--bundle")) bundle = takeStr(argc, argv, i, "");
@@ -86,6 +87,8 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--fieldshot")) fieldshot = takeStr(argc, argv, i, "");
         else if (!std::strcmp(a, "--player-img")) playerImg = takeInt(argc, argv, i, playerImg);
         else if (!std::strcmp(a, "--face")) face = takeInt(argc, argv, i, face);
+        else if (!std::strcmp(a, "--open-msg")) openMsg = takeInt(argc, argv, i, openMsg);
+        else if (!std::strcmp(a, "--open-cnt")) openCnt = takeInt(argc, argv, i, openCnt);
         else if (!std::strcmp(a, "--player")) { const char* v = takeStr(argc, argv, i, ""); std::sscanf(v, "%d,%d", &startCol, &startRow); }
         else if (!std::strcmp(a, "--frames")) cfg.max_frames    = takeInt(argc, argv, i, cfg.max_frames);
         else if (!std::strcmp(a, "--scale"))  cfg.scale         = takeInt(argc, argv, i, cfg.scale);
@@ -166,7 +169,9 @@ int main(int argc, char** argv) {
     if (!host.init()) return 1;
     host.setBundleDir(bundle);
     host.setPlayerSprite(playerImg, playerVar);
+    host.loadText(bundle);
     host.setField(field.get(), fb);
+    if (openMsg >= 0) field->openMessage(openMsg, openCnt > 0 ? openCnt : 1);
 
     if (!fieldshot.empty()) {
         if (face >= 0) { InputState in; in.held = (uint32_t)(face==0?BTN_DOWN:face==1?BTN_UP:face==2?BTN_LEFT:BTN_RIGHT); field->update(in); }

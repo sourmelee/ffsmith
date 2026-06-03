@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 namespace ffsmith {
 
@@ -35,5 +36,13 @@ Texture load_tex(const std::string& path);
 FfMap   load_ffmap(const std::string& path);
 bool    save_tex(const std::string& path, const Texture& t);
 std::string find_map_key(const std::string& bundleDir, int mapId);  // resolve MapChange target
+
+struct Font {                       // baked bitmap-font atlas (text/font.tex + .meta)
+    Texture atlas;
+    int cw = 0, ch = 0, cols = 0, first = 32;
+    bool valid() const { return atlas.valid() && cw > 0 && cols > 0; }
+};
+std::unordered_map<int, std::string> load_messages(const std::string& path);  // text/messages.bin
+Font load_font(const std::string& texPath, const std::string& metaPath);
 
 }  // namespace ffsmith

@@ -37,6 +37,7 @@ public:
     void setBundleDir(const std::string& d) { bundleDir_ = d; }
     void setPlayerSprite(int img, int var) { playerImg_ = img; playerVar_ = var; }
     bool shotField(const std::string& path);   // render one field frame, read pixels, save .tex
+    bool loadText(const std::string& bundleDir);   // load text/messages.bin + font atlas
 
     const InputState& input() const { return input_; }
     SDL_Renderer* renderer() const { return renderer_; }
@@ -49,6 +50,7 @@ private:
     bool ensureMapTexture(const Texture& img);
     SDL_Texture* spriteTex(int img, int var, int& w, int& h);  // cached fldchr sheet
     bool drawSprite(int img, int var, int facing, int animCol, int lx, int ly, int tile);
+    void drawText(int x, int y, const std::string& s, int maxChars, uint8_t r, uint8_t g, uint8_t b);
 
     HostConfig    cfg_;
     SDL_Window*   window_     = nullptr;
@@ -60,6 +62,9 @@ private:
     std::string   bundleDir_;
     int           playerImg_ = -1, playerVar_ = 0;
     std::unordered_map<int, SDL_Texture*> sprites_;   // key = img*100+var
+    SDL_Texture*  fontTex_ = nullptr;
+    int           fcw_ = 0, fch_ = 0, fcols_ = 0, ffirst_ = 32;
+    std::unordered_map<int, std::string> messages_;
     InputState    input_;
     uint32_t      raw_held_   = 0;
     uint32_t      held_prev_  = 0;

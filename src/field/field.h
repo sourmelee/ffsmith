@@ -33,6 +33,11 @@ public:
     int  dialogueMsg() const;
     void confirm();                              // talk / advance dialogue
     Warp consumeWarp() { Warp w = warp_; warp_ = Warp{}; return w; }  // pending cross-map warp
+    void openMessage(int id, int count = 1) {    // debug/scripted: open dialogue at msg id..id+count-1
+        dlgQueue_.clear();
+        for (int k = 0; k < count; ++k) dlgQueue_.push_back(id + k);
+        dlgIdx_ = 0; dlgActive_ = true;
+    }
     const Event* npcAt(int c, int r) const;      // talk target at a tile
     const Event* stepTriggerAt(int c, int r) const;  // step-on trigger at a tile
 
