@@ -37,7 +37,7 @@ public:
     void setBundleDir(const std::string& d) { bundleDir_ = d; }
     void setPlayerSprite(int img, int var) { playerImg_ = img; playerVar_ = var; }
     bool shotField(const std::string& path);   // render one field frame, read pixels, save .tex
-    bool loadText(const std::string& bundleDir);   // load text/messages.bin + font atlas
+    bool loadText(const std::string& bundleDir, int bank);   // load text/msg{bank}.bin + font
 
     const InputState& input() const { return input_; }
     SDL_Renderer* renderer() const { return renderer_; }

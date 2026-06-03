@@ -114,21 +114,22 @@ bool Host::drawSprite(int img, int var, int facing, int animCol, int lx, int ly,
     return true;
 }
 
-bool Host::loadText(const std::string& dir) {
-    messages_ = load_messages(dir + "/text/messages.bin");
-    Font f = load_font(dir + "/text/font.tex", dir + "/text/font.meta");
-    if (f.valid() && renderer_) {
-        if (fontTex_) SDL_DestroyTexture(fontTex_);
-        fontTex_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC,
-                                     f.atlas.w, f.atlas.h);
-        if (fontTex_) {
-            SDL_UpdateTexture(fontTex_, nullptr, f.atlas.rgba.data(), f.atlas.w * 4);
-            SDL_SetTextureBlendMode(fontTex_, SDL_BLENDMODE_BLEND);
+bool Host::loadText(const std::string& dir, int bank) {
+    messages_ = load_messages(dir + "/text/msg" + std::to_string(bank) + ".bin");
+    if (!fontTex_) {                         // font is shared across banks -> load once
+        Font f = load_font(dir + "/text/font.tex", dir + "/text/font.meta");
+        if (f.valid() && renderer_) {
+            fontTex_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC,
+                                         f.atlas.w, f.atlas.h);
+            if (fontTex_) {
+                SDL_UpdateTexture(fontTex_, nullptr, f.atlas.rgba.data(), f.atlas.w * 4);
+                SDL_SetTextureBlendMode(fontTex_, SDL_BLENDMODE_BLEND);
+            }
+            fcw_ = f.cw; fch_ = f.ch; fcols_ = f.cols; ffirst_ = f.first;
         }
-        fcw_ = f.cw; fch_ = f.ch; fcols_ = f.cols; ffirst_ = f.first;
     }
-    std::printf("[FFSmith] text: %zu messages, font %s\n",
-                messages_.size(), fontTex_ ? "loaded" : "missing");
+    std::printf("[FFSmith] text: bank %d, %zu messages, font %s\n",
+                bank, messages_.size(), fontTex_ ? "loaded" : "missing");
     return !messages_.empty();
 }
 

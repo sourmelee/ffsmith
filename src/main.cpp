@@ -21,6 +21,7 @@ static int dirBtnFromChar(char ch) {
                   case 'L': case 'l': return BTN_LEFT; case 'R': case 'r': return BTN_RIGHT; default: return 0; }
 }
 static const char* faceName(int f) { static const char* n[4]={"down","up","left","right"}; return (f>=0&&f<4)?n[f]:"?"; }
+static int bankOf(const std::string& key) { int g = 0; std::sscanf(key.c_str(), "g%d", &g); return g; }  // map group = dialogue bank
 
 static void printUsage(const char* exe) {
     std::printf(
@@ -134,7 +135,7 @@ int main(int argc, char** argv) {
         if (sc < 0 || sc >= m.w) sc = m.w / 2;
         if (sr < 0 || sr >= m.h) sr = m.h / 2;
         field = std::make_unique<Field>(&m, t, sc, sr);
-        if (host) host->setField(field.get(), fb);
+        if (host) { host->setField(field.get(), fb); host->loadText(bundle, bankOf(key)); }
         return true;
     };
 
@@ -169,7 +170,7 @@ int main(int argc, char** argv) {
     if (!host.init()) return 1;
     host.setBundleDir(bundle);
     host.setPlayerSprite(playerImg, playerVar);
-    host.loadText(bundle);
+    host.loadText(bundle, bankOf(map));
     host.setField(field.get(), fb);
     if (openMsg >= 0) field->openMessage(openMsg, openCnt > 0 ? openCnt : 1);
 
