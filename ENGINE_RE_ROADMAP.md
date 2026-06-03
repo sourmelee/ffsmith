@@ -221,7 +221,7 @@ Player walks a real map with correct tile collision, map-edge behavior (wrap vs.
 | M0 | Empty SDL2 loop + textured quad | window runs, draws |
 | M1 | **✅ Static map render** from baked bundle | byte-identical to toolkit (g0_p0_m101, m501) |
 | M2 | **✅ Field walkable** (Part 4) | walk + follow-camera + bounds + `capk.dat` wall collision (verified g0_p0_m501) |
-| M3 | **◑ Event VM + NPCs + dialogue + real sprites** ✅; triggers/warps = M3b | talk + character sprites verified in-engine (g0_p0_m501) |
+| M3 | **◑ VM + NPCs + dialogue + sprites + step-on triggers** ✅; cross-map warps = next | talk + step-trigger + walk anim verified |
 | M4 | Game state machine + scene dispatch (`ChangeMainFunc`) | title → field → menu transitions |
 | M5 | Menu system (`MenuClass`) | item/equip/status menus |
 | M6 | Battle engine (`BattleClass`) | turn loop + damage match original |

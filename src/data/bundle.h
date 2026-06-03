@@ -34,5 +34,6 @@ struct FfMap {
 Texture load_tex(const std::string& path);
 FfMap   load_ffmap(const std::string& path);
 bool    save_tex(const std::string& path, const Texture& t);
+std::string find_map_key(const std::string& bundleDir, int mapId);  // resolve MapChange target
 
 }  // namespace ffsmith

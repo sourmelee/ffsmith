@@ -31,6 +31,7 @@ public:
 
     bool init();
     int  run();
+    bool frame();   // one loop iteration; false when quit (lets caller swap maps on warp)
     void setMap(const Texture& fb);
     void setField(Field* f, const Texture& mapImg);
     void setBundleDir(const std::string& d) { bundleDir_ = d; }
@@ -47,7 +48,7 @@ private:
     void render();
     bool ensureMapTexture(const Texture& img);
     SDL_Texture* spriteTex(int img, int var, int& w, int& h);  // cached fldchr sheet
-    bool drawSprite(int img, int var, int facing, int lx, int ly, int tile);
+    bool drawSprite(int img, int var, int facing, int animCol, int lx, int ly, int tile);
 
     HostConfig    cfg_;
     SDL_Window*   window_     = nullptr;
@@ -64,6 +65,9 @@ private:
     uint32_t      held_prev_  = 0;
     bool          running_    = false;
     uint64_t      tick_count_ = 0;
+    bool          started_ = false;
+    uint64_t      prevCtr_ = 0;
+    double        acc_ = 0.0;
 };
 
 }  // namespace ffsmith

@@ -33,6 +33,17 @@ const Event* Field::npcAt(int c, int r) const {
     return nullptr;
 }
 
+// A step-on trigger: an invisible scripted event (img<=0) whose boot condition
+// is a trigger type (not 0=NPC, not 1=action/talk -> boot 2..8 per the engine's
+// GetEventBootCondition switch). Fires when the player lands on its tile.
+const Event* Field::stepTriggerAt(int c, int r) const {
+    for (const auto& e : map_->events)
+        if (e.x == c && e.y == r && !e.scripts.empty() && e.img <= 0
+            && e.boot != 0 && e.boot != 1)
+            return &e;
+    return nullptr;
+}
+
 int Field::dialogueMsg() const {
     return (dlgActive_ && dlgIdx_ < (int)dlgQueue_.size()) ? dlgQueue_[dlgIdx_] : -1;
 }
@@ -48,7 +59,9 @@ void Field::confirm() {
     const Event* e = npcAt(col_ + DX[facing_], row_ + DY[facing_]);
     if (!e) return;
     VMOut o = run_event(*e);
-    if (!o.messages.empty()) {
+    if (o.warpMap >= 0) {
+        warp_ = {o.warpMap, o.warpX, o.warpY, o.warpDir};
+    } else if (!o.messages.empty()) {
         dlgQueue_ = o.messages; dlgIdx_ = 0; dlgActive_ = true;
         std::printf("[FFSmith] talk (img %d) -> msg %d\n", e->img, dlgQueue_[0]);
     }
@@ -59,7 +72,22 @@ void Field::update(const InputState& in) {
     if (dlgActive_) return;                 // freeze movement during dialogue
     if (moving_) {
         prog_ += speed_;
-        if (prog_ >= tile_) { col_ = tcol_; row_ = trow_; prog_ = 0; moving_ = false; }
+        if (prog_ >= tile_) {
+            col_ = tcol_; row_ = trow_; prog_ = 0; moving_ = false;
+            const Event* t = stepTriggerAt(col_, row_);   // step-on trigger fires on arrival
+            if (t) {
+                VMOut o = run_event(*t);
+                if (o.warpMap >= 0) {
+                    warp_ = {o.warpMap, o.warpX, o.warpY, o.warpDir};
+                    std::printf("[FFSmith] step trigger @(%d,%d) -> warp map %d @(%d,%d)\n",
+                                col_, row_, o.warpMap, o.warpX, o.warpY);
+                } else if (!o.messages.empty()) {
+                    dlgQueue_ = o.messages; dlgIdx_ = 0; dlgActive_ = true;
+                    std::printf("[FFSmith] step trigger @(%d,%d) boot=0x%02x -> msg %d\n",
+                                col_, row_, t->boot, dlgQueue_[0]);
+                }
+            }
+        }
     }
     if (!moving_) {
         int d = dirFromHeld(in.held);
@@ -73,5 +101,13 @@ void Field::update(const InputState& in) {
 
 int Field::pixelX() const { int b = col_ * tile_; if (moving_) b += DX[moveDir_] * prog_; return b; }
 int Field::pixelY() const { int b = row_ * tile_; if (moving_) b += DY[moveDir_] * prog_; return b; }
+
+int Field::animCol() const {
+    if (!moving_) return 0;                      // idle
+    static const int SEQ[4] = {1, 0, 2, 0};      // walkA, idle, walkB, idle
+    int t = tile_ > 0 ? tile_ : 32;
+    int ph = (prog_ * 4) / t; if (ph < 0) ph = 0; if (ph > 3) ph = 3;
+    return SEQ[ph];
+}
 
 }  // namespace ffsmith

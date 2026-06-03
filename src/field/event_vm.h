@@ -10,7 +10,7 @@ struct VMOut {
     std::vector<int> messages;       // SetMessage ids, in encounter order
     std::vector<std::string> log;    // human-readable action trace
     bool sawEnd = false;
-    int  warpMap = -1;               // MapChange target map id (M3b), else -1
+    int  warpMap = -1, warpX = 0, warpY = 0, warpDir = -1;  // MapChange dest (else map=-1)
 };
 
 // Execute an event's scripts. First cut: linear walk of length-split blocks,

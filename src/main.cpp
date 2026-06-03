@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 
 using namespace ffsmith;
@@ -28,11 +29,12 @@ static void printUsage(const char* exe) {
         "  --map KEY      map to load, e.g. g0_p0_m501 (bundle defaults to exe folder)\n"
         "  --bundle DIR   asset bundle dir (has maps/ and tex/); default: exe folder\n"
         "  --player C,R   start tile (default: map centre)\n"
-        "  --shot PATH    compose map, write .tex, exit (headless)\n"
-        "  --walk SCRIPT  headless: feed U/D/L/R steps, print player path, exit\n"
-        "  --events       headless: list events + dry-run their scripts + a talk sim, exit\n"
         "  --player-img N fldchr id for the player sprite (default: first NPC sprite)\n"
+        "  --shot PATH    compose map, write .tex, exit (headless)\n"
         "  --fieldshot P  render one field frame to a .tex and exit (headless)\n"
+        "  --walk SCRIPT  headless: feed U/D/L/R steps (follows warps), print path, exit\n"
+        "  --events       headless: list events + dry-run their scripts + a talk sim, exit\n"
+        "  --face N        set player facing for --fieldshot (0=D,1=U,2=L,3=R)\n"
         "  --frames N     run N ticks then exit\n"
         "  --scale N      zoom factor (default 3); resize the window to see more map\n"
         "  --hz N         logic tick rate (default 60)\n"
@@ -41,32 +43,26 @@ static void printUsage(const char* exe) {
 }
 
 static void dump_events(const FfMap& m, int tile) {
-    std::printf("[FFSmith] %s events: %d\n", "map", (int)m.events.size());
+    std::printf("[FFSmith] map events: %zu\n", m.events.size());
     for (size_t i = 0; i < m.events.size(); ++i) {
         const Event& e = m.events[i];
         std::printf("  ev[%zu] (%2d,%2d) type=%d boot=0x%02x img=%d/%d scripts=%zu\n",
                     i, e.x, e.y, e.type, e.boot, e.img, e.var, e.scripts.size());
         VMOut o = run_event(e);
         for (const auto& l : o.log) std::printf("       . %s\n", l.c_str());
-        if (!o.messages.empty()) {
-            std::printf("       => messages:");
-            for (int id : o.messages) std::printf(" %d", id);
-            std::printf("\n");
-        }
+        if (!o.messages.empty()) { std::printf("       => messages:"); for (int id : o.messages) std::printf(" %d", id); std::printf("\n"); }
     }
-    // Talk simulation against the first visible NPC with scripts.
     const Event* npc = nullptr;
     for (const auto& e : m.events) if (e.img > 0 && !e.scripts.empty()) { npc = &e; break; }
     if (npc) {
-        struct A { int dx, dy; uint32_t btn; } adj[4] =
-            {{0,1,BTN_UP},{0,-1,BTN_DOWN},{1,0,BTN_LEFT},{-1,0,BTN_RIGHT}};
+        struct A { int dx, dy; uint32_t btn; } adj[4] = {{0,1,BTN_UP},{0,-1,BTN_DOWN},{1,0,BTN_LEFT},{-1,0,BTN_RIGHT}};
         for (auto& a : adj) {
             int sx = npc->x + a.dx, sy = npc->y + a.dy;
             if (sx < 0 || sy < 0 || sx >= m.w || sy >= m.h) continue;
             Field f(&m, tile, sx, sy);
-            if (f.isSolid(sx, sy)) continue;          // must stand on open ground
-            InputState face; face.held = a.btn; f.update(face);     // turn toward NPC (blocked)
-            InputState conf; conf.pressed = BTN_CONFIRM; f.update(conf);  // talk
+            if (f.isSolid(sx, sy)) continue;
+            InputState face; face.held = a.btn; f.update(face);
+            InputState conf; conf.pressed = BTN_CONFIRM; f.update(conf);
             std::printf("[sim] stand (%d,%d) face %s -> NPC(%d,%d): inDialogue=%d msg=%d\n",
                         sx, sy, faceName(f.facing()), npc->x, npc->y, f.inDialogue(), f.dialogueMsg());
             break;
@@ -79,8 +75,7 @@ int main(int argc, char** argv) {
     HostConfig cfg;
     std::string bundle, map, shot, walk, fieldshot;
     bool events_mode = false;
-    int playerImg = -1, playerVar = 0, face = -1;
-    int startCol = -1, startRow = -1;
+    int playerImg = -1, playerVar = 0, face = -1, startCol = -1, startRow = -1;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
         if      (!std::strcmp(a, "--bundle")) bundle = takeStr(argc, argv, i, "");
@@ -104,18 +99,15 @@ int main(int argc, char** argv) {
     if (cfg.tick_hz < 1) cfg.tick_hz = 60;
 
     if (map.empty()) { Host host(cfg); if (!host.init()) return 1; return host.run(); }
-
     if (bundle.empty()) { char* base = SDL_GetBasePath(); if (base) { bundle = base; SDL_free(base); } else bundle = "."; }
 
-    const std::string ffmap_path = bundle + "/maps/" + map + ".ffmap";
-    FfMap m = load_ffmap(ffmap_path);
-    if (!m.valid()) { std::fprintf(stderr, "[FFSmith] failed to load %s\n", ffmap_path.c_str()); return 1; }
+    FfMap m = load_ffmap(bundle + "/maps/" + map + ".ffmap");
+    if (!m.valid()) { std::fprintf(stderr, "[FFSmith] failed to load %s/maps/%s.ffmap\n", bundle.c_str(), map.c_str()); return 1; }
     Texture fb = compose_map(bundle, m);
     if (!fb.valid()) { std::fprintf(stderr, "[FFSmith] compose failed for %s\n", map.c_str()); return 1; }
-    const int tile = (m.w > 0) ? fb.w / m.w : 32;
+    int tile = (m.w > 0) ? fb.w / m.w : 32;
     std::printf("[FFSmith] %s: %dx%d cells, %d layers, %zu events, tile=%d -> %dx%d px\n",
                 map.c_str(), m.w, m.h, m.n_layers, m.events.size(), tile, fb.w, fb.h);
-
     if (startCol < 0 || startCol >= m.w) startCol = m.w / 2;
     if (startRow < 0 || startRow >= m.h) startRow = m.h / 2;
 
@@ -126,20 +118,43 @@ int main(int argc, char** argv) {
     }
     if (events_mode) { dump_events(m, tile); return 0; }
 
-    Field field(&m, tile, startCol, startRow);
+    std::unique_ptr<Field> field = std::make_unique<Field>(&m, tile, startCol, startRow);
+
+    // Reload a map in place (warp). m/fb/field are reassigned; host updated if given.
+    auto loadInto = [&](const std::string& key, int sc, int sr, Host* host) -> bool {
+        FfMap nm = load_ffmap(bundle + "/maps/" + key + ".ffmap");
+        if (!nm.valid()) return false;
+        Texture nfb = compose_map(bundle, nm);
+        if (!nfb.valid()) return false;
+        m = std::move(nm); fb = std::move(nfb);
+        int t = (m.w > 0) ? fb.w / m.w : 32;
+        if (sc < 0 || sc >= m.w) sc = m.w / 2;
+        if (sr < 0 || sr >= m.h) sr = m.h / 2;
+        field = std::make_unique<Field>(&m, t, sc, sr);
+        if (host) host->setField(field.get(), fb);
+        return true;
+    };
 
     if (!walk.empty()) {
         std::printf("[FFSmith] walk trace from (%d,%d) on %dx%d map:\n", startCol, startRow, m.w, m.h);
         for (char ch : walk) {
             int btn = dirBtnFromChar(ch); if (!btn) continue;
             InputState in; in.held = (uint32_t)btn;
-            int bc = field.col(), br = field.row();
-            field.update(in);
+            int bc = field->col(), br = field->row();
+            field->update(in);
             InputState none; int guard = 0;
-            while (field.moving() && guard++ < 100000) field.update(none);
-            bool moved = (field.col() != bc || field.row() != br);
-            std::printf("  %c -> (%2d,%2d) face=%-5s %s\n", ch, field.col(), field.row(),
-                        faceName(field.facing()), moved ? "moved" : "blocked");
+            while (field->moving() && guard++ < 100000) field->update(none);
+            bool moved = (field->col() != bc || field->row() != br);
+            std::printf("  %c -> (%2d,%2d) face=%-5s %s\n", ch, field->col(), field->row(),
+                        faceName(field->facing()), moved ? "moved" : "blocked");
+            Warp w = field->consumeWarp();
+            if (w.valid()) {
+                std::string key = find_map_key(bundle, w.map);
+                if (!key.empty() && loadInto(key, w.x, w.y, nullptr))
+                    std::printf("  >> WARP to %s @(%d,%d)\n", key.c_str(), w.x, w.y);
+                else
+                    std::printf("  >> WARP target map %d not found in bundle\n", w.map);
+            }
         }
         return 0;
     }
@@ -151,12 +166,25 @@ int main(int argc, char** argv) {
     if (!host.init()) return 1;
     host.setBundleDir(bundle);
     host.setPlayerSprite(playerImg, playerVar);
-    host.setField(&field, fb);
-    if (face >= 0) { InputState in; in.held = (uint32_t)(face==0?BTN_DOWN:face==1?BTN_UP:face==2?BTN_LEFT:BTN_RIGHT); field.update(in); }
+    host.setField(field.get(), fb);
+
     if (!fieldshot.empty()) {
+        if (face >= 0) { InputState in; in.held = (uint32_t)(face==0?BTN_DOWN:face==1?BTN_UP:face==2?BTN_LEFT:BTN_RIGHT); field->update(in); }
         bool ok = host.shotField(fieldshot);
         std::printf("[FFSmith] field shot %s -> %s\n", ok ? "ok" : "FAILED", fieldshot.c_str());
         return ok ? 0 : 1;
     }
-    return host.run();
+
+    // Windowed loop with cross-map warps.
+    while (host.frame()) {
+        Warp w = field->consumeWarp();
+        if (w.valid()) {
+            std::string key = find_map_key(bundle, w.map);
+            if (!key.empty() && loadInto(key, w.x, w.y, &host))
+                std::printf("[FFSmith] warped to %s @(%d,%d)\n", key.c_str(), w.x, w.y);
+            else
+                std::fprintf(stderr, "[FFSmith] warp target map %d not found\n", w.map);
+        }
+    }
+    return 0;
 }

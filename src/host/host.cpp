@@ -84,28 +84,31 @@ SDL_Texture* Host::spriteTex(int img, int var, int& w, int& h) {
     return tex;
 }
 
-// Draw the standing frame for a facing, feet-aligned on a tile at logical (lx,ly).
-// Standard 256x512-style sheets use the field_anm entry-1 character template:
-// 48x48 cells, origin (1,1), pitch 50; per-facing standing cell (decoded +
-// eyeballed from fldchr19): DOWN=(51,1) front, UP=(1,51) back, LEFT=(1,1),
-// RIGHT=(101,1). Small NPC sheets fall back to the top-left cell.
-bool Host::drawSprite(int img, int var, int facing, int lx, int ly, int tile) {
+// Draw a character frame, feet-aligned on a tile at logical (lx,ly).
+// field_anm character template (Jack-confirmed on fldchr1): 48x48 cells, origin
+// (1,1), pitch 50.  ROW = facing: DOWN=y1, UP=y51, LEFT=y101, RIGHT=y101 (LEFT
+// flipped horizontally).  COL = frame: idle=x1, walkA=x51, walkB=x101.
+// Small NPC sheets fall back to the top-left cell.
+bool Host::drawSprite(int img, int var, int facing, int animCol, int lx, int ly, int tile) {
     int tw = 0, th = 0;
     SDL_Texture* tex = spriteTex(img, var, tw, th);
     if (!tex) return false;
     int sx = 0, sy = 0, cw = 48, ch = 48;
+    SDL_RendererFlip flip = SDL_FLIP_NONE;
     if (tw >= 149 && th >= 149) {
-        static const int FX[4] = {51, 1, 1, 101};   // DOWN, UP, LEFT, RIGHT
-        static const int FY[4] = {1, 51, 1, 1};
+        static const int RY[4] = {1, 51, 101, 101};   // DOWN, UP, LEFT, RIGHT
         int f = (facing >= 0 && facing < 4) ? facing : 0;
-        sx = FX[f]; sy = FY[f];
+        int c = (animCol >= 0 && animCol < 3) ? animCol : 0;
+        sy = RY[f];
+        sx = 1 + c * 50;
+        if (f == FACE_RIGHT) flip = SDL_FLIP_HORIZONTAL;
     } else {
         cw = tw < 48 ? tw : 48;
         ch = th < 48 ? th : 48;
     }
     SDL_Rect src{ sx, sy, cw, ch };
     SDL_Rect dst{ lx + (tile - cw) / 2, ly + tile - ch, cw, ch };
-    SDL_RenderCopy(renderer_, tex, &src, &dst);
+    SDL_RenderCopyEx(renderer_, tex, &src, &dst, 0.0, nullptr, flip);
     return true;
 }
 
@@ -180,7 +183,7 @@ void Host::render() {
         for (const auto& e : field_->map()->events) {
             int lx = offX + e.x * tile - camX, ly = offY + e.y * tile - camY;
             if (e.img > 0) {
-                if (!drawSprite(e.img, e.var, FACE_DOWN, lx, ly, tile)) {
+                if (!drawSprite(e.img, e.var, FACE_DOWN, 0, lx, ly, tile)) {
                     SDL_SetRenderDrawColor(renderer_, 80, 170, 255, 200);
                     SDL_Rect er{ lx, ly, tile, tile }; SDL_RenderFillRect(renderer_, &er);
                 }
@@ -192,7 +195,7 @@ void Host::render() {
 
         // player sprite (fallback to yellow marker if no sprite)
         const int sx = offX + px - camX, sy = offY + py - camY;
-        if (playerImg_ < 0 || !drawSprite(playerImg_, playerVar_, field_->facing(), sx, sy, tile)) {
+        if (playerImg_ < 0 || !drawSprite(playerImg_, playerVar_, field_->facing(), field_->animCol(), sx, sy, tile)) {
             SDL_SetRenderDrawColor(renderer_, 255, 230, 40, 200);
             SDL_Rect pr{ sx, sy, tile, tile }; SDL_RenderFillRect(renderer_, &pr);
             SDL_SetRenderDrawColor(renderer_, 20, 20, 20, 230);
@@ -240,25 +243,27 @@ bool Host::shotField(const std::string& path) {
     return save_tex(path, t);
 }
 
-int Host::run() {
-    running_ = true;
+bool Host::frame() {
+    if (!started_) { started_ = true; running_ = true; prevCtr_ = SDL_GetPerformanceCounter(); acc_ = 0.0; }
+    if (!running_) return false;
+    pumpEvents();
     const double dt = 1.0 / static_cast<double>(cfg_.tick_hz);
     if (cfg_.max_frames >= 0) {
-        while (running_) { pumpEvents(); stepInput(); update(dt); render(); }
+        stepInput(); update(dt); render();
     } else {
-        const uint64_t freq = SDL_GetPerformanceFrequency();
-        uint64_t prev = SDL_GetPerformanceCounter();
-        double acc = 0.0;
-        while (running_) {
-            pumpEvents();
-            const uint64_t now = SDL_GetPerformanceCounter();
-            acc += static_cast<double>(now - prev) / static_cast<double>(freq);
-            prev = now;
-            if (acc > 0.25) acc = 0.25;
-            while (acc >= dt && running_) { stepInput(); update(dt); acc -= dt; }
-            render();
-        }
+        const uint64_t now = SDL_GetPerformanceCounter();
+        acc_ += static_cast<double>(now - prevCtr_) / static_cast<double>(SDL_GetPerformanceFrequency());
+        prevCtr_ = now;
+        if (acc_ > 0.25) acc_ = 0.25;
+        while (acc_ >= dt && running_) { stepInput(); update(dt); acc_ -= dt; }
+        render();
     }
+    return running_;
+}
+
+int Host::run() {
+    started_ = false;
+    while (frame()) {}
     std::printf("[FFSmith] clean exit after %llu ticks\n", static_cast<unsigned long long>(tick_count_));
     return 0;
 }

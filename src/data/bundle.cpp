@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 
 namespace ffsmith {
 
@@ -108,6 +109,22 @@ bool save_tex(const std::string& path, const Texture& t) {
     std::fwrite(t.rgba.data(), 1, t.rgba.size(), f);
     std::fclose(f);
     return true;
+}
+
+std::string find_map_key(const std::string& bundleDir, int mapId) {
+    namespace fs = std::filesystem;
+    const std::string want = "_m" + std::to_string(mapId) + ".ffmap";
+    std::error_code ec;
+    fs::path dir = fs::path(bundleDir) / "maps";
+    if (fs::exists(dir, ec)) {
+        for (const auto& e : fs::directory_iterator(dir, ec)) {
+            std::string fn = e.path().filename().string();
+            if (fn.size() > want.size() &&
+                fn.compare(fn.size() - want.size(), want.size(), want) == 0)
+                return e.path().stem().string();   // "gG_pP_mMID"
+        }
+    }
+    return "";
 }
 
 }  // namespace ffsmith
