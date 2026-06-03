@@ -18,29 +18,41 @@ static int dirFromHeld(uint32_t h) {
     return -1;
 }
 
+// Boot condition classifies an event's trigger (FieldClass::GetEventBootCondition):
+//   0 = auto/parallel-on-load, 1 = action/talk, 2/3/6/7/8 = position (step/range)
+//   triggers.  Doors and map-edge warps are position triggers and can be type 0
+//   (town building doors) OR type 1 (interior exits) -- so we key off boot, not type.
+static bool isStepTrigger(const Event& e) {
+    return !e.scripts.empty() &&
+           (e.boot == 2 || e.boot == 3 || e.boot == 6 || e.boot == 7 || e.boot == 8);
+}
+static bool isStandingChara(const Event& e) {  // talk/auto NPC: solid, talk on confirm
+    return e.img > 0 && (e.boot == 0 || e.boot == 1);
+}
+
 bool Field::isSolid(int c, int r) const {
     if (c < 0 || r < 0 || c >= map_->w || r >= map_->h) return true;
-    for (const auto& e : map_->events)        // visible NPCs block movement
-        if (e.img > 0 && e.x == c && e.y == r) return true;
+    // Standing NPCs/objects block movement; position triggers (incl. visible door
+    // sprites) are walkable so you can step onto them and warp.
+    for (const auto& e : map_->events)
+        if (e.x == c && e.y == r && isStandingChara(e)) return true;
     if (map_->pass.empty()) return false;
     uint8_t nib = map_->pass[(size_t)r * map_->w + c];
     return (nib & 0x0f) == 0;
 }
 
+// An interactable NPC to talk to: a standing chara (sprite + script, action/talk boot).
 const Event* Field::npcAt(int c, int r) const {
     for (const auto& e : map_->events)
-        if (e.x == c && e.y == r && !e.scripts.empty()) return &e;
+        if (e.x == c && e.y == r && !e.scripts.empty() && isStandingChara(e)) return &e;
     return nullptr;
 }
 
-// A step-on trigger: an invisible scripted event (img<=0) whose boot condition
-// is a trigger type (not 0=NPC, not 1=action/talk -> boot 2..8 per the engine's
-// GetEventBootCondition switch). Fires when the player lands on its tile.
+// A step-on trigger: a position-trigger event (boot 2/3/6/7/8) with a script.  Fires
+// when the player lands on its tile; the script's 0x6b/0x41 supplies the warp dest.
 const Event* Field::stepTriggerAt(int c, int r) const {
     for (const auto& e : map_->events)
-        if (e.x == c && e.y == r && !e.scripts.empty() && e.img <= 0
-            && e.boot != 0 && e.boot != 1)
-            return &e;
+        if (e.x == c && e.y == r && isStepTrigger(e)) return &e;
     return nullptr;
 }
 
@@ -79,8 +91,8 @@ void Field::update(const InputState& in) {
                 VMOut o = run_event(*t);
                 if (o.warpMap >= 0) {
                     warp_ = {o.warpMap, o.warpX, o.warpY, o.warpDir};
-                    std::printf("[FFSmith] step trigger @(%d,%d) -> warp map %d @(%d,%d)\n",
-                                col_, row_, o.warpMap, o.warpX, o.warpY);
+                    std::printf("[FFSmith] step trigger @(%d,%d) boot=0x%02x -> warp map %d @(%d,%d)\n",
+                                col_, row_, t->boot, o.warpMap, o.warpX, o.warpY);
                 } else if (!o.messages.empty()) {
                     dlgQueue_ = o.messages; dlgIdx_ = 0; dlgActive_ = true;
                     std::printf("[FFSmith] step trigger @(%d,%d) boot=0x%02x -> msg %d\n",

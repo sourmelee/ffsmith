@@ -221,7 +221,7 @@ Player walks a real map with correct tile collision, map-edge behavior (wrap vs.
 | M0 | Empty SDL2 loop + textured quad | window runs, draws |
 | M1 | **✅ Static map render** from baked bundle | byte-identical to toolkit (g0_p0_m101, m501) |
 | M2 | **✅ Field walkable** (Part 4) | walk + follow-camera + bounds + `capk.dat` wall collision (verified g0_p0_m501) |
-| M3 | **VM + NPCs + dialogue + sprites + step-on triggers + cross-map warps (script `MapChange`)** ✅; header-encoded door warps = next | talk + step-trigger + walk anim + warp (load/reposition) verified |
+| M3 | **VM + NPCs + dialogue + sprites + step-on triggers + cross-map warps** ✅ (script `MapChange` **and** real door/edge warps via the script-var idiom); font/text = next | talk + step-trigger + walk anim + door round-trip (m500↔m501) verified |
 | M4 | Game state machine + scene dispatch (`ChangeMainFunc`) | title → field → menu transitions |
 | M5 | Menu system (`MenuClass`) | item/equip/status menus |
 | M6 | Battle engine (`BattleClass`) | turn loop + damage match original |
@@ -242,4 +242,4 @@ M2 is the immediate objective; everything in Part 3 precedes it.
 
 ---
 
-*Status 2026-06-01: M0 ✅ + M1 ✅ — FFSmith loads toolkit-baked `.ffmap`/`.tex` and composes maps **byte-identical** to the toolkit (verified g0_p0_m101, g0_p0_m501). Toolkit baker: `python ffd_toolkit.py --bake-ffsmith`. M2 ✅ incl. **`capk.dat` wall collision** (chip-attribute file decoded; FFM1 bakes a per-cell pass grid). M3 core ✅ — event-script VM + NPCs (solid) + face-to-talk placeholder dialogue (FFM2 event baking). M3b ✅ — real field sprites (facing + walk anim, `field_anm` template), step-on triggers (boot-condition switch), and cross-map warps (script `MapChange` 0x41: VM extracts map+x/y/dir, engine `find_map_key`→load→reposition, frame-stepped loop). Next: header-encoded door/stairs warps (not script-driven), font/text for real dialogue.*
+*Status 2026-06-01: M0 ✅ + M1 ✅ — FFSmith loads toolkit-baked `.ffmap`/`.tex` and composes maps **byte-identical** to the toolkit (verified g0_p0_m101, g0_p0_m501). Toolkit baker: `python ffd_toolkit.py --bake-ffsmith`. M2 ✅ incl. **`capk.dat` wall collision** (chip-attribute file decoded; FFM1 bakes a per-cell pass grid). M3 core ✅ — event-script VM + NPCs (solid) + face-to-talk placeholder dialogue (FFM2 event baking). M3b ✅ — real field sprites (facing + walk anim, `field_anm` template), step-on triggers (boot-condition switch), and cross-map warps (script `MapChange` 0x41: VM extracts map+x/y/dir, engine `find_map_key`→load→reposition, frame-stepped loop). **Door/edge warps decoded** (not header-encoded as first assumed): `0x6B` BulkSetVars sub2 sets script vars (var0=map,2=x,3=y,4=dir), `0x66` SetEntityAction action `0x04` executes — verified m500↔m501 round trip, 4507/4514 records in-bounds. Next: font/text for real dialogue.*
