@@ -3,16 +3,20 @@
 #include <SDL.h>
 #include <cstdio>
 #include <string>
+#include <algorithm>
 #include "field/field.h"
 #include "field/event_vm.h"
 
 namespace ffsmith {
+
+namespace { const char* kMenuItems[] = {"Item", "Equip", "Status", "Save", "Quit"}; const int kMenuN = 5; }
 
 Host::Host(const HostConfig& cfg) : cfg_(cfg) {}
 
 Host::~Host() {
     for (auto& kv : sprites_) if (kv.second) SDL_DestroyTexture(kv.second);
     if (fontTex_)  SDL_DestroyTexture(fontTex_);
+    if (titleTex_) SDL_DestroyTexture(titleTex_);
     if (map_tex_)  SDL_DestroyTexture(map_tex_);
     if (renderer_) SDL_DestroyRenderer(renderer_);
     if (window_)   SDL_DestroyWindow(window_);
@@ -169,7 +173,8 @@ static uint32_t keyToButton(SDL_Keycode k) {
         case SDLK_DOWN: case SDLK_s: return BTN_DOWN;
         case SDLK_LEFT: case SDLK_a: return BTN_LEFT;
         case SDLK_RIGHT: case SDLK_d: return BTN_RIGHT;
-        case SDLK_z: case SDLK_SPACE: case SDLK_RETURN: return BTN_CONFIRM;
+        case SDLK_z: case SDLK_SPACE: return BTN_CONFIRM;
+        case SDLK_RETURN: case SDLK_TAB: return BTN_MENU;
         case SDLK_x: case SDLK_BACKSPACE: return BTN_CANCEL;
         case SDLK_q: return BTN_L;
         case SDLK_e: return BTN_R;
@@ -200,12 +205,31 @@ void Host::stepInput() {
 }
 
 void Host::update(double /*dt*/) {
-    if (field_) field_->update(input_);
+    if (mode_ == Mode::Title) {
+        ++blink_;
+        if (input_.pressed & (BTN_CONFIRM | BTN_MENU)) { mode_ = Mode::Field; blink_ = 0; }
+    } else if (menuOpen_) {
+        updateMenu(input_);
+    } else if (field_) {
+        if (input_.pressed & BTN_MENU) { menuOpen_ = true; menuCursor_ = 0; }
+        else field_->update(input_);
+    }
     ++tick_count_;
     if (cfg_.max_frames >= 0 && static_cast<int>(tick_count_) >= cfg_.max_frames) running_ = false;
 }
 
+void Host::updateMenu(const InputState& in) {
+    if (in.pressed & BTN_UP)   menuCursor_ = (menuCursor_ + kMenuN - 1) % kMenuN;
+    if (in.pressed & BTN_DOWN) menuCursor_ = (menuCursor_ + 1) % kMenuN;
+    if (in.pressed & (BTN_CANCEL | BTN_MENU)) menuOpen_ = false;
+    if (in.pressed & BTN_CONFIRM) {
+        if (menuCursor_ == kMenuN - 1) running_ = false;   // Quit
+        else menuOpen_ = false;                            // others: stub
+    }
+}
+
 void Host::render() {
+    if (mode_ == Mode::Title) { renderTitle(); SDL_RenderPresent(renderer_); return; }
     if (field_ && map_tex_) {
         int winW = 0, winH = 0;
         SDL_GetWindowSize(window_, &winW, &winH);
@@ -273,6 +297,7 @@ void Host::render() {
             const int maxChars = fcw_ > 0 ? (bw - 12) / fcw_ : 30;
             drawText(bx + 6, by + 6, txt, maxChars, 255, 255, 255);
         }
+        if (menuOpen_) renderMenu(vw, vh);
         SDL_RenderPresent(renderer_);
         return;
     }
@@ -286,6 +311,56 @@ void Host::render() {
     SDL_SetRenderDrawColor(renderer_, 16, 24, 64, 255);
     SDL_RenderClear(renderer_);
     SDL_RenderPresent(renderer_);
+}
+
+bool Host::loadTitle(const std::string& bundleDir) {
+    Texture t = load_tex(bundleDir + "/ui/title.tex");
+    if (!t.valid() || !renderer_) return false;
+    if (titleTex_) SDL_DestroyTexture(titleTex_);
+    titleTex_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, t.w, t.h);
+    if (titleTex_) {
+        SDL_UpdateTexture(titleTex_, nullptr, t.rgba.data(), t.w * 4);
+        SDL_SetTextureBlendMode(titleTex_, SDL_BLENDMODE_BLEND);
+        titleW_ = t.w; titleH_ = t.h;
+    }
+    return titleTex_ != nullptr;
+}
+
+void Host::renderTitle() {
+    int winW = 0, winH = 0; SDL_GetWindowSize(window_, &winW, &winH);
+    const int sc = cfg_.scale < 1 ? 1 : cfg_.scale;
+    int vw = winW / sc; if (vw < 16) vw = 16;
+    int vh = winH / sc; if (vh < 16) vh = 16;
+    SDL_RenderSetScale(renderer_, (float)sc, (float)sc);
+    SDL_SetRenderDrawColor(renderer_, 8, 10, 28, 255);
+    SDL_RenderClear(renderer_);
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    if (titleTex_ && titleW_ > 0) {
+        double s = std::min((double)vw * 0.82 / titleW_, (double)vh * 0.55 / titleH_);
+        if (s <= 0.0) s = 1.0;
+        int dw = (int)(titleW_ * s), dh = (int)(titleH_ * s);
+        SDL_Rect dst{ (vw - dw) / 2, vh / 7, dw, dh };
+        SDL_RenderCopy(renderer_, titleTex_, nullptr, &dst);
+    } else {
+        drawText(vw / 2 - 28, vh / 6, "FFSmith", 20, 255, 255, 255);
+    }
+    if (((blink_ / 32) & 1) == 0 && fcw_ > 0) {
+        const char* p = "PRESS  START";
+        drawText(vw / 2 - 12 * fcw_ / 2, vh * 3 / 4, p, 40, 235, 235, 255);
+    }
+}
+
+void Host::renderMenu(int vw, int /*vh*/) {
+    const int pw = 96, ph = kMenuN * 14 + 12, px = vw - pw - 6, py = 6;
+    SDL_SetRenderDrawColor(renderer_, 12, 16, 48, 238);
+    SDL_Rect box{ px, py, pw, ph }; SDL_RenderFillRect(renderer_, &box);
+    SDL_SetRenderDrawColor(renderer_, 235, 235, 255, 255);
+    SDL_RenderDrawRect(renderer_, &box);
+    for (int i = 0; i < kMenuN; ++i) {
+        int ty = py + 6 + i * 14;
+        if (i == menuCursor_) drawText(px + 5, ty, ">", 2, 255, 240, 120);
+        drawText(px + 16, ty, kMenuItems[i], 12, 255, 255, 255);
+    }
 }
 
 bool Host::shotField(const std::string& path) {

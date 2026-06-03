@@ -29,6 +29,8 @@ public:
     Host(const Host&)            = delete;
     Host& operator=(const Host&) = delete;
 
+    enum class Mode { Title, Field };
+
     bool init();
     int  run();
     bool frame();   // one loop iteration; false when quit (lets caller swap maps on warp)
@@ -36,6 +38,9 @@ public:
     void setField(Field* f, const Texture& mapImg);
     void setBundleDir(const std::string& d) { bundleDir_ = d; }
     void setPlayerSprite(int img, int var) { playerImg_ = img; playerVar_ = var; }
+    void setMode(Mode m) { mode_ = m; }
+    void openMenu() { menuOpen_ = true; menuCursor_ = 0; }
+    bool loadTitle(const std::string& bundleDir);   // ui/title.tex
     bool shotField(const std::string& path);   // render one field frame, read pixels, save .tex
     bool loadText(const std::string& bundleDir, int bank);   // load text/msg{bank}.bin + font
 
@@ -50,6 +55,9 @@ private:
     bool ensureMapTexture(const Texture& img);
     SDL_Texture* spriteTex(int img, int var, int& w, int& h);  // cached fldchr sheet
     bool drawSprite(int img, int var, int facing, int animCol, int lx, int ly, int tile);
+    void updateMenu(const InputState& in);
+    void renderTitle();
+    void renderMenu(int vw, int vh);
     void drawText(int x, int y, const std::string& s, int maxChars, uint8_t r, uint8_t g, uint8_t b);
 
     HostConfig    cfg_;
@@ -65,6 +73,12 @@ private:
     SDL_Texture*  fontTex_ = nullptr;
     int           fcw_ = 0, fch_ = 0, fcols_ = 0, ffirst_ = 32;
     std::unordered_map<int, std::string> messages_;
+    Mode          mode_ = Mode::Field;
+    bool          menuOpen_ = false;
+    int           menuCursor_ = 0;
+    int           blink_ = 0;
+    SDL_Texture*  titleTex_ = nullptr;
+    int           titleW_ = 0, titleH_ = 0;
     InputState    input_;
     uint32_t      raw_held_   = 0;
     uint32_t      held_prev_  = 0;
