@@ -32,6 +32,7 @@ static bool isStandingChara(const Event& e) {  // talk/auto NPC: solid, talk on 
 
 bool Field::isSolid(int c, int r) const {
     if (c < 0 || r < 0 || c >= map_->w || r >= map_->h) return true;
+    if (noClip_) return false;                 // debug no-clip: only bounds block
     // Standing NPCs/objects block movement; position triggers (incl. visible door
     // sprites) are walkable so you can step onto them and warp.
     for (const auto& e : map_->events)

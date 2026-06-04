@@ -42,7 +42,7 @@ On Windows: install SDL2 (e.g. `vcpkg install sdl2`, or the SDL2 development pac
 ./build/ffsmith --help
 ```
 
-Arrows / WASD = move · Z / Space = confirm · X = cancel · Enter = menu · Esc = quit.
+Arrows / WASD = move · Z / Space = confirm · X = cancel · Enter / Tab = menu · F1-F4 = debug · Esc = quit.
 
 ## Running a baked map
 
@@ -63,6 +63,25 @@ ffsmith --bundle out_bundle --map g0_p0_m501
 **Map keys** are `g{group}_p{pack}_m{id}` (note the `p`): e.g. `g0_p0_m501`, not
 `g0_0_m501`. List what you have with `ls maps` / `dir maps` and drop the
 `.ffmap` suffix. Good first maps: `g0_p0_m501` (small interior), `g0_p0_m101`.
+
+## Debug launcher (default boot)
+
+By default FFSmith boots into a **debug launcher** (no `--map` needed — it lists the
+bundle's maps): choose the **map**, the **character** (player `fldchr` sprite),
+the **spawn tile** (X/Y) and **facing**, and toggle **No-clip**, **Collision**
+overlay, and the **HUD**; **START** drops you into the field.
+
+```sh
+ffsmith --bundle out_bundle            # -> debug launcher
+ffsmith --bundle out_bundle --title    # -> title screen -> launcher
+ffsmith --bundle out_bundle --map g0_p0_m501   # preselects that map in the launcher
+```
+
+In the launcher: **arrows** move the cursor / change a value, **L/R (Q/E)** jump by
+10 through long map & character lists, **Z** toggles or activates **START**.
+
+In the field, debug hotkeys: **F1** back to the launcher, **F2** no-clip, **F3**
+collision overlay, **F4** HUD. The HUD shows `map (x,y) facing`.
 
 A window opens; **arrows / WASD** walk the player (yellow marker), the camera
 follows, **Esc** quits. Big maps make big windows — use `--scale 1` or `2`.

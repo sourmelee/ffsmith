@@ -11,6 +11,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <vector>
 
 using namespace ffsmith;
 
@@ -40,6 +41,8 @@ static void printUsage(const char* exe) {
         "  --scale N      zoom factor (default 3); resize the window to see more map\n"
         "  --title        boot to the title screen (Start/Z -> field)\n"
         "  --menu         open the field menu (for screenshots)\n"
+        "  --debug        boot into the debug launcher (default for windowed)\n"
+        "  --noclip/--overlay/--hud   field debug toggles (for screenshots)\n"
         "  --hz N         logic tick rate (default 60)\n"
         "  --help         show this help\n"
         "Controls: arrows/WASD move, Z confirm, Enter/Tab menu, X cancel, Esc quit. Resizable.\n", exe);
@@ -81,6 +84,7 @@ int main(int argc, char** argv) {
     int playerImg = -1, playerVar = 0, face = -1, startCol = -1, startRow = -1;
     int openMsg = -1, openCnt = 1;
     bool startTitle = false, openMenuFlag = false;
+    bool debugMode = false, dbgNoclip = false, dbgOverlay = false, dbgHud = false;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
         if      (!std::strcmp(a, "--bundle")) bundle = takeStr(argc, argv, i, "");
@@ -95,6 +99,10 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--open-cnt")) openCnt = takeInt(argc, argv, i, openCnt);
         else if (!std::strcmp(a, "--title")) startTitle = true;
         else if (!std::strcmp(a, "--menu"))  openMenuFlag = true;
+        else if (!std::strcmp(a, "--debug")) debugMode = true;
+        else if (!std::strcmp(a, "--noclip")) dbgNoclip = true;
+        else if (!std::strcmp(a, "--overlay")) dbgOverlay = true;
+        else if (!std::strcmp(a, "--hud")) dbgHud = true;
         else if (!std::strcmp(a, "--player")) { const char* v = takeStr(argc, argv, i, ""); std::sscanf(v, "%d,%d", &startCol, &startRow); }
         else if (!std::strcmp(a, "--frames")) cfg.max_frames    = takeInt(argc, argv, i, cfg.max_frames);
         else if (!std::strcmp(a, "--scale"))  cfg.scale         = takeInt(argc, argv, i, cfg.scale);
@@ -107,8 +115,13 @@ int main(int argc, char** argv) {
     if (cfg.scale < 1) cfg.scale = 1;
     if (cfg.tick_hz < 1) cfg.tick_hz = 60;
 
-    if (map.empty()) { Host host(cfg); if (!host.init()) return 1; return host.run(); }
     if (bundle.empty()) { char* base = SDL_GetBasePath(); if (base) { bundle = base; SDL_free(base); } else bundle = "."; }
+    std::vector<std::string> mapList = list_maps(bundle);
+    std::vector<int> spriteList = list_sprites(bundle);
+    if (map.empty()) {
+        if (!mapList.empty()) map = mapList.front();             // debug launcher needs an initial map
+        else { Host host(cfg); if (!host.init()) return 1; return host.run(); }
+    }
 
     FfMap m = load_ffmap(bundle + "/maps/" + map + ".ffmap");
     if (!m.valid()) { std::fprintf(stderr, "[FFSmith] failed to load %s/maps/%s.ffmap\n", bundle.c_str(), map.c_str()); return 1; }
@@ -137,14 +150,15 @@ int main(int argc, char** argv) {
         if (!nfb.valid()) return false;
         m = std::move(nm); fb = std::move(nfb);
         int t = (m.w > 0) ? fb.w / m.w : 32;
-        if (sc < 0 || sc >= m.w) sc = m.w / 2;
-        if (sr < 0 || sr >= m.h) sr = m.h / 2;
+        if (sc < 0) sc = m.w / 2; else if (sc >= m.w) sc = m.w - 1;
+        if (sr < 0) sr = m.h / 2; else if (sr >= m.h) sr = m.h - 1;
         field = std::make_unique<Field>(&m, t, sc, sr);
         if (host) { host->setField(field.get(), fb); host->loadText(bundle, bankOf(key)); }
         return true;
     };
 
     if (!walk.empty()) {
+        if (dbgNoclip) field->setNoClip(true);
         std::printf("[FFSmith] walk trace from (%d,%d) on %dx%d map:\n", startCol, startRow, m.w, m.h);
         for (char ch : walk) {
             int btn = dirBtnFromChar(ch); if (!btn) continue;
@@ -177,9 +191,15 @@ int main(int argc, char** argv) {
     host.setPlayerSprite(playerImg, playerVar);
     host.loadText(bundle, bankOf(map));
     host.setField(field.get(), fb);
+    host.setDebugData(mapList, spriteList);
+    host.debugSelectMap(map);
+    host.setMapKey(map);
     if (openMsg >= 0) field->openMessage(openMsg, openCnt > 0 ? openCnt : 1);
     if (startTitle) { host.loadTitle(bundle); host.setMode(Host::Mode::Title); }
     if (openMenuFlag) host.openMenu();
+    host.setViewFlags(dbgOverlay, dbgHud);
+    if (dbgNoclip) field->setNoClip(true);
+    if (debugMode) host.setMode(Host::Mode::Debug);
 
     if (!fieldshot.empty()) {
         if (face >= 0) { InputState in; in.held = (uint32_t)(face==0?BTN_DOWN:face==1?BTN_UP:face==2?BTN_LEFT:BTN_RIGHT); field->update(in); }
@@ -188,14 +208,28 @@ int main(int argc, char** argv) {
         return ok ? 0 : 1;
     }
 
-    // Windowed loop with cross-map warps.
+    // Interactive default: boot into the debug launcher (unless --title was given).
+    if (!startTitle) host.setMode(Host::Mode::Debug);
+
+    // Windowed loop: debug-launcher START loads the chosen map; plus cross-map warps.
     while (host.frame()) {
+        Host::DebugStart ds;
+        if (host.consumeDebugStart(ds) && !ds.map.empty() && loadInto(ds.map, ds.x, ds.y, &host)) {
+            host.setPlayerSprite(ds.img, 0);
+            host.setMapKey(ds.map);
+            field->setNoClip(ds.noclip);
+            field->setFacing(ds.facing);
+            host.setMode(Host::Mode::Field);
+            std::printf("[FFSmith] debug start -> %s @(%d,%d) fldchr%d noclip=%d\n",
+                        ds.map.c_str(), ds.x, ds.y, ds.img, (int)ds.noclip);
+        }
         Warp w = field->consumeWarp();
         if (w.valid()) {
             std::string key = find_map_key(bundle, w.map);
-            if (!key.empty() && loadInto(key, w.x, w.y, &host))
+            if (!key.empty() && loadInto(key, w.x, w.y, &host)) {
+                host.setMapKey(key);
                 std::printf("[FFSmith] warped to %s @(%d,%d)\n", key.c_str(), w.x, w.y);
-            else
+            } else
                 std::fprintf(stderr, "[FFSmith] warp target map %d not found\n", w.map);
         }
     }

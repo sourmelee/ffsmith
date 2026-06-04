@@ -4,6 +4,7 @@
 #include <cstring>
 #include <filesystem>
 #include <unordered_map>
+#include <algorithm>
 
 namespace ffsmith {
 
@@ -154,6 +155,42 @@ Font load_font(const std::string& texPath, const std::string& metaPath) {
         f.cols = rd_u16(&m[8]); f.first = rd_u16(&m[10]);
     }
     return f;
+}
+
+std::vector<std::string> list_maps(const std::string& bundleDir) {
+    namespace fs = std::filesystem;
+    std::vector<std::string> out; std::error_code ec;
+    fs::path dir = fs::path(bundleDir) / "maps";
+    if (fs::exists(dir, ec))
+        for (const auto& e : fs::directory_iterator(dir, ec)) {
+            std::string fn = e.path().filename().string();
+            if (fn.size() > 6 && fn.compare(fn.size() - 6, 6, ".ffmap") == 0)
+                out.push_back(e.path().stem().string());
+        }
+    std::sort(out.begin(), out.end(), [](const std::string& a, const std::string& b) {
+        int ga=0,pa=0,ma=0,gb=0,pb=0,mb=0;
+        std::sscanf(a.c_str(), "g%d_p%d_m%d", &ga,&pa,&ma);
+        std::sscanf(b.c_str(), "g%d_p%d_m%d", &gb,&pb,&mb);
+        if (ga!=gb) return ga<gb;
+        if (pa!=pb) return pa<pb;
+        return ma<mb;
+    });
+    return out;
+}
+
+std::vector<int> list_sprites(const std::string& bundleDir) {
+    namespace fs = std::filesystem;
+    std::vector<int> out; std::error_code ec;
+    fs::path dir = fs::path(bundleDir) / "sprites";
+    if (fs::exists(dir, ec))
+        for (const auto& e : fs::directory_iterator(dir, ec)) {
+            std::string fn = e.path().filename().string(); int img=0,var=0;
+            if (std::sscanf(fn.c_str(), "fldchr%d_%d.tex", &img,&var) == 2 &&
+                std::find(out.begin(), out.end(), img) == out.end())
+                out.push_back(img);
+        }
+    std::sort(out.begin(), out.end());
+    return out;
 }
 
 }  // namespace ffsmith

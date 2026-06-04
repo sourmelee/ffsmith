@@ -44,5 +44,7 @@ struct Font {                       // baked bitmap-font atlas (text/font.tex + 
 };
 std::unordered_map<int, std::string> load_messages(const std::string& path);  // text/messages.bin
 Font load_font(const std::string& texPath, const std::string& metaPath);
+std::vector<std::string> list_maps(const std::string& bundleDir);    // map keys, sorted by g/p/m
+std::vector<int>         list_sprites(const std::string& bundleDir);  // unique fldchr ids, sorted
 
 }  // namespace ffsmith

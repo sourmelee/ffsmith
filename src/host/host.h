@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <vector>
 #include "host/input.h"
 #include "data/bundle.h"
 
@@ -29,7 +30,8 @@ public:
     Host(const Host&)            = delete;
     Host& operator=(const Host&) = delete;
 
-    enum class Mode { Title, Field };
+    enum class Mode { Debug, Title, Field };
+    struct DebugStart { std::string map; int img = -1, x = 0, y = 0, facing = 0; bool noclip = false; };
 
     bool init();
     int  run();
@@ -41,6 +43,11 @@ public:
     void setMode(Mode m) { mode_ = m; }
     void openMenu() { menuOpen_ = true; menuCursor_ = 0; }
     bool loadTitle(const std::string& bundleDir);   // ui/title.tex
+    void setDebugData(std::vector<std::string> maps, std::vector<int> sprites);
+    void debugSelectMap(const std::string& key);
+    void setMapKey(const std::string& key) { mapKey_ = key; }   // for the HUD
+    void setViewFlags(bool overlay, bool hud) { overlayOn_ = overlay; hudOn_ = hud; }
+    bool consumeDebugStart(DebugStart& out);
     bool shotField(const std::string& path);   // render one field frame, read pixels, save .tex
     bool loadText(const std::string& bundleDir, int bank);   // load text/msg{bank}.bin + font
 
@@ -58,6 +65,8 @@ private:
     void updateMenu(const InputState& in);
     void renderTitle();
     void renderMenu(int vw, int vh);
+    void updateDebug(const InputState& in);
+    void renderDebug();
     void drawText(int x, int y, const std::string& s, int maxChars, uint8_t r, uint8_t g, uint8_t b);
 
     HostConfig    cfg_;
@@ -79,6 +88,13 @@ private:
     int           blink_ = 0;
     SDL_Texture*  titleTex_ = nullptr;
     int           titleW_ = 0, titleH_ = 0;
+    std::vector<std::string> dbgMaps_;
+    std::vector<int> dbgSprites_;
+    int  dbgRow_ = 0, dbgMapIdx_ = 0, dbgSprIdx_ = 0;
+    int  dbgX_ = 0, dbgY_ = 0, dbgFacing_ = 0;
+    bool dbgNoclip_ = false, dbgOverlay_ = false, dbgHud_ = true, dbgStart_ = false;
+    bool overlayOn_ = false, hudOn_ = false;
+    std::string mapKey_;
     InputState    input_;
     uint32_t      raw_held_   = 0;
     uint32_t      held_prev_  = 0;

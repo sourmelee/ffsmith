@@ -33,6 +33,9 @@ public:
     int  dialogueMsg() const;
     void confirm();                              // talk / advance dialogue
     Warp consumeWarp() { Warp w = warp_; warp_ = Warp{}; return w; }  // pending cross-map warp
+    void setNoClip(bool b) { noClip_ = b; }     // debug: ignore collision
+    bool noClip() const { return noClip_; }
+    void setFacing(int f) { if (f >= 0 && f < 4) facing_ = f; }
     void openMessage(int id, int count = 1) {    // debug/scripted: open dialogue at msg id..id+count-1
         dlgQueue_.clear();
         for (int k = 0; k < count; ++k) dlgQueue_.push_back(id + k);
@@ -52,6 +55,7 @@ private:
     int prog_ = 0;
     int speed_ = 2;
     Warp warp_;
+    bool noClip_ = false;
     std::vector<int> dlgQueue_;
     int dlgIdx_ = 0;
     bool dlgActive_ = false;

@@ -189,6 +189,10 @@ void Host::pumpEvents() {
             case SDL_QUIT: running_ = false; break;
             case SDL_KEYDOWN:
                 if (ev.key.keysym.sym == SDLK_ESCAPE) { running_ = false; break; }
+                if (ev.key.keysym.sym == SDLK_F1) { mode_ = (mode_ == Mode::Field) ? Mode::Debug : Mode::Field; break; }
+                if (ev.key.keysym.sym == SDLK_F2 && field_) { field_->setNoClip(!field_->noClip()); break; }
+                if (ev.key.keysym.sym == SDLK_F3) { overlayOn_ = !overlayOn_; break; }
+                if (ev.key.keysym.sym == SDLK_F4) { hudOn_ = !hudOn_; break; }
                 if (!ev.key.repeat) raw_held_ |= keyToButton(ev.key.keysym.sym);
                 break;
             case SDL_KEYUP: raw_held_ &= ~keyToButton(ev.key.keysym.sym); break;
@@ -205,9 +209,11 @@ void Host::stepInput() {
 }
 
 void Host::update(double /*dt*/) {
-    if (mode_ == Mode::Title) {
+    if (mode_ == Mode::Debug) {
+        updateDebug(input_);
+    } else if (mode_ == Mode::Title) {
         ++blink_;
-        if (input_.pressed & (BTN_CONFIRM | BTN_MENU)) { mode_ = Mode::Field; blink_ = 0; }
+        if (input_.pressed & (BTN_CONFIRM | BTN_MENU)) { mode_ = Mode::Debug; blink_ = 0; }
     } else if (menuOpen_) {
         updateMenu(input_);
     } else if (field_) {
@@ -229,6 +235,7 @@ void Host::updateMenu(const InputState& in) {
 }
 
 void Host::render() {
+    if (mode_ == Mode::Debug) { renderDebug(); SDL_RenderPresent(renderer_); return; }
     if (mode_ == Mode::Title) { renderTitle(); SDL_RenderPresent(renderer_); return; }
     if (field_ && map_tex_) {
         int winW = 0, winH = 0;
@@ -284,6 +291,30 @@ void Host::render() {
             SDL_RenderFillRect(renderer_, &fr);
         }
 
+        if (overlayOn_) {
+            const FfMap* mp = field_->map();
+            for (int r = 0; r < mp->h; ++r)
+                for (int c = 0; c < mp->w; ++c) {
+                    if (mp->pass.empty() || (mp->pass[(size_t)r * mp->w + c] & 0x0f) != 0) continue;
+                    SDL_SetRenderDrawColor(renderer_, 230, 40, 40, 90);
+                    SDL_Rect rr{ offX + c*tile - camX, offY + r*tile - camY, tile, tile };
+                    SDL_RenderFillRect(renderer_, &rr);
+                }
+            for (const auto& e : mp->events)
+                if (e.img > 0 && (e.boot == 0 || e.boot == 1)) {
+                    SDL_SetRenderDrawColor(renderer_, 60, 120, 255, 90);
+                    SDL_Rect rr{ offX + e.x*tile - camX, offY + e.y*tile - camY, tile, tile };
+                    SDL_RenderFillRect(renderer_, &rr);
+                }
+        }
+        if (hudOn_ && fcw_ > 0) {
+            const char* fn = field_->facing()==0?"down":field_->facing()==1?"up":field_->facing()==2?"left":"right";
+            std::string hud = mapKey_ + " (" + std::to_string(field_->col()) + "," + std::to_string(field_->row())
+                            + ") " + fn + (field_->noClip() ? "  NOCLIP" : "");
+            SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 175);
+            SDL_Rect hb{ 2, 2, (int)hud.size()*fcw_ + 6, fch_ + 4 }; SDL_RenderFillRect(renderer_, &hb);
+            drawText(5, 4, hud, 80, 180, 255, 180);
+        }
         if (field_->inDialogue()) {
             const int boxH = 68, by = vh - boxH - 4, bx = 6, bw = vw - 12;
             SDL_SetRenderDrawColor(renderer_, 12, 16, 48, 235);
@@ -361,6 +392,86 @@ void Host::renderMenu(int vw, int /*vh*/) {
         if (i == menuCursor_) drawText(px + 5, ty, ">", 2, 255, 240, 120);
         drawText(px + 16, ty, kMenuItems[i], 12, 255, 255, 255);
     }
+}
+
+void Host::setDebugData(std::vector<std::string> maps, std::vector<int> sprites) {
+    dbgMaps_ = std::move(maps);
+    dbgSprites_ = std::move(sprites);
+    if (dbgMapIdx_ >= (int)dbgMaps_.size()) dbgMapIdx_ = 0;
+    if (dbgSprIdx_ >= (int)dbgSprites_.size()) dbgSprIdx_ = 0;
+}
+
+void Host::debugSelectMap(const std::string& key) {
+    for (size_t i = 0; i < dbgMaps_.size(); ++i)
+        if (dbgMaps_[i] == key) { dbgMapIdx_ = (int)i; break; }
+}
+
+bool Host::consumeDebugStart(DebugStart& out) {
+    if (!dbgStart_) return false;
+    dbgStart_ = false;
+    out.map    = (dbgMapIdx_ >= 0 && dbgMapIdx_ < (int)dbgMaps_.size()) ? dbgMaps_[dbgMapIdx_] : std::string();
+    out.img    = (dbgSprIdx_ >= 0 && dbgSprIdx_ < (int)dbgSprites_.size()) ? dbgSprites_[dbgSprIdx_] : -1;
+    out.x = dbgX_; out.y = dbgY_; out.facing = dbgFacing_; out.noclip = dbgNoclip_;
+    overlayOn_ = dbgOverlay_; hudOn_ = dbgHud_;     // apply the view toggles on launch
+    return true;
+}
+
+void Host::updateDebug(const InputState& in) {
+    const int N = 9;
+    if (in.pressed & BTN_UP)   dbgRow_ = (dbgRow_ + N - 1) % N;
+    if (in.pressed & BTN_DOWN) dbgRow_ = (dbgRow_ + 1) % N;
+    int dir = (in.pressed & BTN_RIGHT) ? 1 : (in.pressed & BTN_LEFT) ? -1 : 0;
+    int big = (in.pressed & BTN_R) ? 10 : (in.pressed & BTN_L) ? -10 : 0;
+    bool conf = (in.pressed & BTN_CONFIRM) != 0;
+    auto cyc = [](int v, int d, int n) { return n <= 0 ? 0 : (((v + d) % n) + n) % n; };
+    switch (dbgRow_) {
+        case 0: if (dir || big) dbgMapIdx_ = cyc(dbgMapIdx_, dir ? dir : big, (int)dbgMaps_.size()); break;
+        case 1: if (dir || big) dbgSprIdx_ = cyc(dbgSprIdx_, dir ? dir : big, (int)dbgSprites_.size()); break;
+        case 2: dbgX_ = std::max(0, std::min(255, dbgX_ + dir + big)); break;
+        case 3: dbgY_ = std::max(0, std::min(255, dbgY_ + dir + big)); break;
+        case 4: if (dir) dbgFacing_ = (((dbgFacing_ + dir) % 4) + 4) % 4; break;
+        case 5: if (dir || conf) dbgNoclip_ = !dbgNoclip_; break;
+        case 6: if (dir || conf) dbgOverlay_ = !dbgOverlay_; break;
+        case 7: if (dir || conf) dbgHud_ = !dbgHud_; break;
+        default: break;
+    }
+    if (conf && dbgRow_ == 8) dbgStart_ = true;
+}
+
+void Host::renderDebug() {
+    int winW = 0, winH = 0; SDL_GetWindowSize(window_, &winW, &winH);
+    const int sc = cfg_.scale < 1 ? 1 : cfg_.scale;
+    int vw = winW / sc; if (vw < 16) vw = 16;
+    int vh = winH / sc; if (vh < 16) vh = 16;
+    SDL_RenderSetScale(renderer_, (float)sc, (float)sc);
+    SDL_SetRenderDrawColor(renderer_, 10, 12, 30, 255);
+    SDL_RenderClear(renderer_);
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    static const char* fac[4] = {"Down", "Up", "Left", "Right"};
+    std::string mapName = (dbgMapIdx_ < (int)dbgMaps_.size()) ? dbgMaps_[dbgMapIdx_] : std::string("(no maps)");
+    int sprId = (dbgSprIdx_ < (int)dbgSprites_.size()) ? dbgSprites_[dbgSprIdx_] : -1;
+    std::string rows[9] = {
+        "Map:       < " + mapName + " >   (" + std::to_string(dbgMapIdx_ + 1) + "/" + std::to_string(dbgMaps_.size()) + ")",
+        "Character: < fldchr" + std::to_string(sprId) + " >",
+        "Spawn X:   < " + std::to_string(dbgX_) + " >",
+        "Spawn Y:   < " + std::to_string(dbgY_) + " >",
+        std::string("Facing:    < ") + fac[dbgFacing_ & 3] + " >",
+        std::string("No-clip:   < ") + (dbgNoclip_ ? "On" : "Off") + " >",
+        std::string("Collision: < ") + (dbgOverlay_ ? "On" : "Off") + " >",
+        std::string("HUD:       < ") + (dbgHud_ ? "On" : "Off") + " >",
+        std::string("START"),
+    };
+    int x = 12, y = 10;
+    drawText(x, y, "FFSmith  -  Debug Launcher", 60, 255, 235, 120);
+    y += 22;
+    for (int i = 0; i < 9; ++i) {
+        int ry = y + i * 13 + (i == 8 ? 8 : 0);
+        if (i == dbgRow_) drawText(x, ry, ">", 2, 255, 240, 120);
+        bool start = (i == 8);
+        drawText(x + 12, ry, rows[i], 64, start ? 255 : 230, 235, start ? 120 : 255);
+    }
+    drawText(x, vh - 13, "arrows move/change  .  L/R jump 10  .  Z toggle/START  .  (F1 menu, F2 noclip)",
+             90, 150, 160, 200);
 }
 
 bool Host::shotField(const std::string& path) {
