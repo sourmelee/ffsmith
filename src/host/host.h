@@ -41,7 +41,9 @@ public:
     void setBundleDir(const std::string& d) { bundleDir_ = d; }
     void setPlayerSprite(int img, int var) { playerImg_ = img; playerVar_ = var; }
     void setMode(Mode m) { mode_ = m; }
-    void openMenu() { menuOpen_ = true; menuCursor_ = 0; }
+    void openMenu() { menuOpen_ = true; menuCursor_ = 0; menuPage_ = 0; }
+    bool loadMenuData(const std::string& bundleDir);   // data/items.bin + chars.bin
+    void openMenuPage(int pg) { menuOpen_ = true; menuPage_ = pg; pageCursor_ = 0; pageScroll_ = 0; pageChar_ = 0; }
     bool loadTitle(const std::string& bundleDir);   // ui/title.tex
     void setDebugData(std::vector<std::string> maps, std::vector<int> sprites);
     void debugSelectMap(const std::string& key);
@@ -65,6 +67,8 @@ private:
     void updateMenu(const InputState& in);
     void renderTitle();
     void renderMenu(int vw, int vh);
+    void renderItemPage(int px, int py, int pw, int ph);
+    void renderCharPage(int px, int py, int pw, int ph, bool status);
     void updateDebug(const InputState& in);
     void renderDebug();
     void drawText(int x, int y, const std::string& s, int maxChars, uint8_t r, uint8_t g, uint8_t b);
@@ -95,6 +99,10 @@ private:
     bool dbgNoclip_ = false, dbgOverlay_ = false, dbgHud_ = true, dbgStart_ = false;
     bool overlayOn_ = false, hudOn_ = false;
     std::string mapKey_;
+    std::unordered_map<int, Item> items_;
+    std::vector<int> itemIds_;
+    std::vector<CharRec> chars_;
+    int menuPage_ = 0, pageCursor_ = 0, pageScroll_ = 0, pageChar_ = 0;
     InputState    input_;
     uint32_t      raw_held_   = 0;
     uint32_t      held_prev_  = 0;

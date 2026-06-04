@@ -193,4 +193,38 @@ std::vector<int> list_sprites(const std::string& bundleDir) {
     return out;
 }
 
+std::vector<Item> load_items(const std::string& path) {
+    std::vector<Item> out; auto buf = read_file(path);
+    if (buf.size() < 8 || std::memcmp(buf.data(), "FITM", 4) != 0) return out;
+    uint32_t n = rd_u32(&buf[4]); size_t o = 8;
+    for (uint32_t i = 0; i < n; ++i) {
+        if (o + 6 > buf.size()) break;
+        Item it; it.id = (int)rd_u32(&buf[o]); int nl = rd_u16(&buf[o + 4]); o += 6;
+        if (o + (size_t)nl > buf.size()) break;
+        it.name.assign((const char*)&buf[o], nl); o += nl;
+        if (o + 2 > buf.size()) break;
+        int dl = rd_u16(&buf[o]); o += 2;
+        if (o + (size_t)dl > buf.size()) break;
+        it.desc.assign((const char*)&buf[o], dl); o += dl;
+        out.push_back(std::move(it));
+    }
+    return out;
+}
+
+std::vector<CharRec> load_chars(const std::string& path) {
+    std::vector<CharRec> out; auto buf = read_file(path);
+    if (buf.size() < 8 || std::memcmp(buf.data(), "FCHR", 4) != 0) return out;
+    uint32_t n = rd_u32(&buf[4]); size_t o = 8;
+    for (uint32_t i = 0; i < n; ++i) {
+        if (o + 6 > buf.size()) break;
+        CharRec c; c.id = (int)rd_u32(&buf[o]); int nl = rd_u16(&buf[o + 4]); o += 6;
+        if (o + (size_t)nl > buf.size()) break;
+        c.name.assign((const char*)&buf[o], nl); o += nl;
+        if (o + 12 > buf.size()) break;
+        for (int k = 0; k < 6; ++k) { c.equip[k] = rd_u16(&buf[o]); o += 2; }
+        out.push_back(std::move(c));
+    }
+    return out;
+}
+
 }  // namespace ffsmith

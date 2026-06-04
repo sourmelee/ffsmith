@@ -225,12 +225,35 @@ void Host::update(double /*dt*/) {
 }
 
 void Host::updateMenu(const InputState& in) {
-    if (in.pressed & BTN_UP)   menuCursor_ = (menuCursor_ + kMenuN - 1) % kMenuN;
-    if (in.pressed & BTN_DOWN) menuCursor_ = (menuCursor_ + 1) % kMenuN;
-    if (in.pressed & (BTN_CANCEL | BTN_MENU)) menuOpen_ = false;
-    if (in.pressed & BTN_CONFIRM) {
-        if (menuCursor_ == kMenuN - 1) running_ = false;   // Quit
-        else menuOpen_ = false;                            // others: stub
+    if (menuPage_ == 0) {                                   // root list
+        if (in.pressed & BTN_UP)   menuCursor_ = (menuCursor_ + kMenuN - 1) % kMenuN;
+        if (in.pressed & BTN_DOWN) menuCursor_ = (menuCursor_ + 1) % kMenuN;
+        if (in.pressed & (BTN_CANCEL | BTN_MENU)) menuOpen_ = false;
+        if (in.pressed & BTN_CONFIRM) {
+            switch (menuCursor_) {
+                case 0: menuPage_ = 1; pageCursor_ = 0; pageScroll_ = 0; break;  // Item
+                case 1: menuPage_ = 2; pageChar_ = 0; break;                      // Equip
+                case 2: menuPage_ = 3; pageChar_ = 0; break;                      // Status
+                case 4: running_ = false; break;                                  // Quit
+                default: break;                                                   // Save (stub)
+            }
+        }
+    } else if (menuPage_ == 1) {                            // Item list
+        int n = (int)itemIds_.size();
+        if (n > 0) {
+            if (in.pressed & BTN_UP)   pageCursor_ = (pageCursor_ + n - 1) % n;
+            if (in.pressed & BTN_DOWN) pageCursor_ = (pageCursor_ + 1) % n;
+            if (in.pressed & BTN_L)    pageCursor_ = std::max(0, pageCursor_ - 10);
+            if (in.pressed & BTN_R)    pageCursor_ = std::min(n - 1, pageCursor_ + 10);
+        }
+        if (in.pressed & (BTN_CANCEL | BTN_MENU)) menuPage_ = 0;
+    } else {                                                // Equip / Status: cycle character
+        int n = (int)chars_.size();
+        if (n > 0) {
+            if (in.pressed & (BTN_DOWN | BTN_RIGHT)) pageChar_ = (pageChar_ + 1) % n;
+            if (in.pressed & (BTN_UP | BTN_LEFT))    pageChar_ = (pageChar_ + n - 1) % n;
+        }
+        if (in.pressed & (BTN_CANCEL | BTN_MENU)) menuPage_ = 0;
     }
 }
 
@@ -381,7 +404,18 @@ void Host::renderTitle() {
     }
 }
 
-void Host::renderMenu(int vw, int /*vh*/) {
+void Host::renderMenu(int vw, int vh) {
+    if (menuPage_ != 0) {
+        int px = 6, py = 6, pw = vw - 12, ph = vh - 12;
+        SDL_SetRenderDrawColor(renderer_, 10, 14, 40, 242);
+        SDL_Rect box{ px, py, pw, ph }; SDL_RenderFillRect(renderer_, &box);
+        SDL_SetRenderDrawColor(renderer_, 235, 235, 255, 255);
+        SDL_RenderDrawRect(renderer_, &box);
+        if (menuPage_ == 1) renderItemPage(px, py, pw, ph);
+        else                renderCharPage(px, py, pw, ph, menuPage_ == 3);
+        drawText(px + pw - 7 * fcw_ - 4, py + ph - fch_ - 2, "X:back", 8, 150, 160, 200);
+        return;
+    }
     const int pw = 96, ph = kMenuN * 14 + 12, px = vw - pw - 6, py = 6;
     SDL_SetRenderDrawColor(renderer_, 12, 16, 48, 238);
     SDL_Rect box{ px, py, pw, ph }; SDL_RenderFillRect(renderer_, &box);
@@ -392,6 +426,62 @@ void Host::renderMenu(int vw, int /*vh*/) {
         if (i == menuCursor_) drawText(px + 5, ty, ">", 2, 255, 240, 120);
         drawText(px + 16, ty, kMenuItems[i], 12, 255, 255, 255);
     }
+}
+
+void Host::renderItemPage(int px, int py, int pw, int ph) {
+    drawText(px + 8, py + 4, "ITEMS", 40, 255, 235, 120);
+    int n = (int)itemIds_.size();
+    int maxChars = fcw_ > 0 ? (pw - 20) / fcw_ : 30;
+    int rowH = fch_ > 0 ? fch_ : 14;
+    int descH = rowH * 3 + 6;
+    int listTop = py + 20, listBot = py + ph - descH - 4;
+    int visRows = (listBot - listTop) / rowH; if (visRows < 1) visRows = 1;
+    if (pageCursor_ < pageScroll_) pageScroll_ = pageCursor_;
+    if (pageCursor_ >= pageScroll_ + visRows) pageScroll_ = pageCursor_ - visRows + 1;
+    if (pageScroll_ < 0) pageScroll_ = 0;
+    for (int i = 0; i < visRows && pageScroll_ + i < n; ++i) {
+        int idx = pageScroll_ + i, id = itemIds_[idx];
+        int ty = listTop + i * rowH;
+        bool sel = (idx == pageCursor_);
+        if (sel) drawText(px + 4, ty, ">", 2, 255, 240, 120);
+        drawText(px + 14, ty, items_[id].name, maxChars, sel ? 255 : 215, 235, sel ? 170 : 255);
+    }
+    if (n > 0) {
+        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 175);
+        SDL_Rect db{ px + 3, listBot, pw - 6, descH }; SDL_RenderFillRect(renderer_, &db);
+        drawText(px + 8, listBot + 3, items_[itemIds_[pageCursor_]].desc, maxChars - 1, 200, 230, 255);
+        std::string pos = std::to_string(pageCursor_ + 1) + "/" + std::to_string(n);
+        drawText(px + pw - (int)pos.size() * fcw_ - 6, py + 4, pos, 12, 180, 190, 220);
+    }
+}
+
+void Host::renderCharPage(int px, int py, int pw, int ph, bool status) {
+    (void)ph;
+    drawText(px + 8, py + 4, status ? "STATUS" : "EQUIP", 40, 255, 235, 120);
+    if (chars_.empty()) { drawText(px + 8, py + 24, "(no character data)", 40, 220, 220, 220); return; }
+    const CharRec& c = chars_[pageChar_ % (int)chars_.size()];
+    int maxChars = fcw_ > 0 ? (pw - 20) / fcw_ : 30;
+    std::string hdr = "<  " + c.name + "  >   (" + std::to_string(pageChar_ + 1) + "/" + std::to_string(chars_.size()) + ")";
+    drawText(px + 8, py + 22, hdr, maxChars, 255, 255, 160);
+    int step = status ? (fch_ * 2) : (fch_ + 2);
+    for (int k = 0; k < 6; ++k) {
+        int ty = py + 42 + k * step;
+        int id = c.equip[k];
+        std::string nm = (id > 0 && items_.count(id)) ? items_[id].name
+                       : (id ? ("#" + std::to_string(id)) : std::string("(empty)"));
+        drawText(px + 10, ty, "Slot " + std::to_string(k + 1) + ":  " + nm, maxChars, 230, 230, 255);
+        if (status && id > 0 && items_.count(id))
+            drawText(px + 22, ty + fch_, items_[id].desc, maxChars - 2, 165, 200, 235);
+    }
+}
+
+bool Host::loadMenuData(const std::string& dir) {
+    auto items = load_items(dir + "/data/items.bin");
+    items_.clear(); itemIds_.clear();
+    for (auto& it : items) { itemIds_.push_back(it.id); items_[it.id] = std::move(it); }
+    chars_ = load_chars(dir + "/data/chars.bin");
+    std::printf("[FFSmith] menu data: %zu items, %zu chars\n", items_.size(), chars_.size());
+    return !items_.empty() || !chars_.empty();
 }
 
 void Host::setDebugData(std::vector<std::string> maps, std::vector<int> sprites) {

@@ -85,6 +85,7 @@ int main(int argc, char** argv) {
     int openMsg = -1, openCnt = 1;
     bool startTitle = false, openMenuFlag = false;
     bool debugMode = false, dbgNoclip = false, dbgOverlay = false, dbgHud = false;
+    int menuPageFlag = 0;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
         if      (!std::strcmp(a, "--bundle")) bundle = takeStr(argc, argv, i, "");
@@ -99,6 +100,7 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--open-cnt")) openCnt = takeInt(argc, argv, i, openCnt);
         else if (!std::strcmp(a, "--title")) startTitle = true;
         else if (!std::strcmp(a, "--menu"))  openMenuFlag = true;
+        else if (!std::strcmp(a, "--menupage")) menuPageFlag = takeInt(argc, argv, i, 0);
         else if (!std::strcmp(a, "--debug")) debugMode = true;
         else if (!std::strcmp(a, "--noclip")) dbgNoclip = true;
         else if (!std::strcmp(a, "--overlay")) dbgOverlay = true;
@@ -192,11 +194,13 @@ int main(int argc, char** argv) {
     host.loadText(bundle, bankOf(map));
     host.setField(field.get(), fb);
     host.setDebugData(mapList, spriteList);
+    host.loadMenuData(bundle);
     host.debugSelectMap(map);
     host.setMapKey(map);
     if (openMsg >= 0) field->openMessage(openMsg, openCnt > 0 ? openCnt : 1);
     if (startTitle) { host.loadTitle(bundle); host.setMode(Host::Mode::Title); }
     if (openMenuFlag) host.openMenu();
+    if (menuPageFlag > 0) host.openMenuPage(menuPageFlag);
     host.setViewFlags(dbgOverlay, dbgHud);
     if (dbgNoclip) field->setNoClip(true);
     if (debugMode) host.setMode(Host::Mode::Debug);
