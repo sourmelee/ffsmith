@@ -51,5 +51,7 @@ struct Item    { int id = 0; std::string name, desc; };
 struct CharRec { int id = 0; std::string name; int equip[6] = {0,0,0,0,0,0}; };
 std::vector<Item>    load_items(const std::string& path);   // data/items.bin
 std::vector<CharRec> load_chars(const std::string& path);   // data/chars.bin
+struct Monster { int id = 0; std::string name; int hp = 0, atk = 0, def = 0, level = 1; };
+std::vector<Monster> load_monsters(const std::string& path);  // data/monsters.bin
 
 }  // namespace ffsmith

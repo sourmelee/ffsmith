@@ -227,4 +227,20 @@ std::vector<CharRec> load_chars(const std::string& path) {
     return out;
 }
 
+std::vector<Monster> load_monsters(const std::string& path) {
+    std::vector<Monster> out; auto buf = read_file(path);
+    if (buf.size() < 8 || std::memcmp(buf.data(), "FMON", 4) != 0) return out;
+    uint32_t n = rd_u32(&buf[4]); size_t o = 8;
+    for (uint32_t i = 0; i < n; ++i) {
+        if (o + 6 > buf.size()) break;
+        Monster m; m.id = (int)rd_u32(&buf[o]); int nl = rd_u16(&buf[o + 4]); o += 6;
+        if (o + (size_t)nl > buf.size()) break;
+        m.name.assign((const char*)&buf[o], nl); o += nl;
+        if (o + 7 > buf.size()) break;
+        m.hp = rd_u16(&buf[o]); m.atk = rd_u16(&buf[o + 2]); m.def = rd_u16(&buf[o + 4]); m.level = buf[o + 6]; o += 7;
+        out.push_back(std::move(m));
+    }
+    return out;
+}
+
 }  // namespace ffsmith

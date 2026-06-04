@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <string>
 #include <algorithm>
+#include <cstdlib>
 #include "field/field.h"
 #include "field/event_vm.h"
 
@@ -11,12 +12,13 @@ namespace ffsmith {
 
 namespace { const char* kMenuItems[] = {"Item", "Equip", "Status", "Save", "Quit"}; const int kMenuN = 5; }
 
-Host::Host(const HostConfig& cfg) : cfg_(cfg) {}
+Host::Host(const HostConfig& cfg) : cfg_(cfg) { dbgScale_ = cfg_.scale; }
 
 Host::~Host() {
     for (auto& kv : sprites_) if (kv.second) SDL_DestroyTexture(kv.second);
     if (fontTex_)  SDL_DestroyTexture(fontTex_);
     if (titleTex_) SDL_DestroyTexture(titleTex_);
+    if (btlbgTex_) SDL_DestroyTexture(btlbgTex_);
     if (map_tex_)  SDL_DestroyTexture(map_tex_);
     if (renderer_) SDL_DestroyRenderer(renderer_);
     if (window_)   SDL_DestroyWindow(window_);
@@ -193,6 +195,9 @@ void Host::pumpEvents() {
                 if (ev.key.keysym.sym == SDLK_F2 && field_) { field_->setNoClip(!field_->noClip()); break; }
                 if (ev.key.keysym.sym == SDLK_F3) { overlayOn_ = !overlayOn_; break; }
                 if (ev.key.keysym.sym == SDLK_F4) { hudOn_ = !hudOn_; break; }
+                if (ev.key.keysym.sym == SDLK_b && mode_ == Mode::Field && !monsters_.empty()) { startBattle(monsters_[std::rand() % (int)monsters_.size()].id); break; }
+                if (ev.key.keysym.sym == SDLK_MINUS) { cfg_.scale = std::max(1, cfg_.scale - 1); dbgScale_ = cfg_.scale; break; }
+                if (ev.key.keysym.sym == SDLK_EQUALS || ev.key.keysym.sym == SDLK_PLUS) { cfg_.scale = std::min(8, cfg_.scale + 1); dbgScale_ = cfg_.scale; break; }
                 if (!ev.key.repeat) raw_held_ |= keyToButton(ev.key.keysym.sym);
                 break;
             case SDL_KEYUP: raw_held_ &= ~keyToButton(ev.key.keysym.sym); break;
@@ -211,6 +216,8 @@ void Host::stepInput() {
 void Host::update(double /*dt*/) {
     if (mode_ == Mode::Debug) {
         updateDebug(input_);
+    } else if (mode_ == Mode::Battle) {
+        updateBattle(input_);
     } else if (mode_ == Mode::Title) {
         ++blink_;
         if (input_.pressed & (BTN_CONFIRM | BTN_MENU)) { mode_ = Mode::Debug; blink_ = 0; }
@@ -259,6 +266,7 @@ void Host::updateMenu(const InputState& in) {
 
 void Host::render() {
     if (mode_ == Mode::Debug) { renderDebug(); SDL_RenderPresent(renderer_); return; }
+    if (mode_ == Mode::Battle) { renderBattle(); SDL_RenderPresent(renderer_); return; }
     if (mode_ == Mode::Title) { renderTitle(); SDL_RenderPresent(renderer_); return; }
     if (field_ && map_tex_) {
         int winW = 0, winH = 0;
@@ -371,6 +379,7 @@ bool Host::loadTitle(const std::string& bundleDir) {
     Texture t = load_tex(bundleDir + "/ui/title.tex");
     if (!t.valid() || !renderer_) return false;
     if (titleTex_) SDL_DestroyTexture(titleTex_);
+    if (btlbgTex_) SDL_DestroyTexture(btlbgTex_);
     titleTex_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, t.w, t.h);
     if (titleTex_) {
         SDL_UpdateTexture(titleTex_, nullptr, t.rgba.data(), t.w * 4);
@@ -480,7 +489,14 @@ bool Host::loadMenuData(const std::string& dir) {
     items_.clear(); itemIds_.clear();
     for (auto& it : items) { itemIds_.push_back(it.id); items_[it.id] = std::move(it); }
     chars_ = load_chars(dir + "/data/chars.bin");
-    std::printf("[FFSmith] menu data: %zu items, %zu chars\n", items_.size(), chars_.size());
+    monsters_ = load_monsters(dir + "/data/monsters.bin");
+    Texture bg = load_tex(dir + "/ui/btlbg.tex");
+    if (bg.valid() && renderer_) {
+        if (btlbgTex_) SDL_DestroyTexture(btlbgTex_);
+        btlbgTex_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, bg.w, bg.h);
+        if (btlbgTex_) { SDL_UpdateTexture(btlbgTex_, nullptr, bg.rgba.data(), bg.w * 4); SDL_SetTextureBlendMode(btlbgTex_, SDL_BLENDMODE_BLEND); }
+    }
+    std::printf("[FFSmith] menu data: %zu items, %zu chars, %zu monsters\n", items_.size(), chars_.size(), monsters_.size());
     return !items_.empty() || !chars_.empty();
 }
 
@@ -507,7 +523,7 @@ bool Host::consumeDebugStart(DebugStart& out) {
 }
 
 void Host::updateDebug(const InputState& in) {
-    const int N = 9;
+    const int N = 10;
     if (in.pressed & BTN_UP)   dbgRow_ = (dbgRow_ + N - 1) % N;
     if (in.pressed & BTN_DOWN) dbgRow_ = (dbgRow_ + 1) % N;
     int dir = (in.pressed & BTN_RIGHT) ? 1 : (in.pressed & BTN_LEFT) ? -1 : 0;
@@ -523,9 +539,10 @@ void Host::updateDebug(const InputState& in) {
         case 5: if (dir || conf) dbgNoclip_ = !dbgNoclip_; break;
         case 6: if (dir || conf) dbgOverlay_ = !dbgOverlay_; break;
         case 7: if (dir || conf) dbgHud_ = !dbgHud_; break;
+        case 8: if (dir) { dbgScale_ = std::max(1, std::min(8, dbgScale_ + dir)); cfg_.scale = dbgScale_; } break;
         default: break;
     }
-    if (conf && dbgRow_ == 8) dbgStart_ = true;
+    if (conf && dbgRow_ == 9) dbgStart_ = true;
 }
 
 void Host::renderDebug() {
@@ -540,7 +557,7 @@ void Host::renderDebug() {
     static const char* fac[4] = {"Down", "Up", "Left", "Right"};
     std::string mapName = (dbgMapIdx_ < (int)dbgMaps_.size()) ? dbgMaps_[dbgMapIdx_] : std::string("(no maps)");
     int sprId = (dbgSprIdx_ < (int)dbgSprites_.size()) ? dbgSprites_[dbgSprIdx_] : -1;
-    std::string rows[9] = {
+    std::string rows[10] = {
         "Map:       < " + mapName + " >   (" + std::to_string(dbgMapIdx_ + 1) + "/" + std::to_string(dbgMaps_.size()) + ")",
         "Character: < fldchr" + std::to_string(sprId) + " >",
         "Spawn X:   < " + std::to_string(dbgX_) + " >",
@@ -549,19 +566,148 @@ void Host::renderDebug() {
         std::string("No-clip:   < ") + (dbgNoclip_ ? "On" : "Off") + " >",
         std::string("Collision: < ") + (dbgOverlay_ ? "On" : "Off") + " >",
         std::string("HUD:       < ") + (dbgHud_ ? "On" : "Off") + " >",
+        std::string("Scale:     < ") + std::to_string(dbgScale_) + "x >",
         std::string("START"),
     };
     int x = 12, y = 10;
     drawText(x, y, "FFSmith  -  Debug Launcher", 60, 255, 235, 120);
     y += 22;
-    for (int i = 0; i < 9; ++i) {
-        int ry = y + i * 13 + (i == 8 ? 8 : 0);
+    for (int i = 0; i < 10; ++i) {
+        int ry = y + i * 13 + (i == 9 ? 8 : 0);
         if (i == dbgRow_) drawText(x, ry, ">", 2, 255, 240, 120);
-        bool start = (i == 8);
+        bool start = (i == 9);
         drawText(x + 12, ry, rows[i], 64, start ? 255 : 230, 235, start ? 120 : 255);
     }
     drawText(x, vh - 13, "arrows move/change  .  L/R jump 10  .  Z toggle/START  .  (F1 menu, F2 noclip)",
              90, 150, 160, 200);
+}
+
+int Host::firstLiving(int from) const {
+    for (int i = std::max(0, from); i < (int)party_.size(); ++i) if (party_[i].hp > 0) return i;
+    return -1;
+}
+bool Host::partyAlive() const { for (const auto& c : party_) if (c.hp > 0) return true; return false; }
+
+void Host::startBattle(int monsterId) {
+    const Monster* mm = nullptr;
+    for (const auto& m : monsters_) if (m.id == monsterId) { mm = &m; break; }
+    if (!mm && !monsters_.empty()) mm = &monsters_[0];
+    if (!mm) return;
+    enemy_ = { mm->name, mm->hp, mm->hp, mm->atk, mm->def, false };
+    party_.clear();
+    static const int HP[4] = {34, 29, 31, 26}, AT[4] = {13, 11, 10, 14}, DF[4] = {6, 5, 7, 4};
+    int n = std::min((int)chars_.size(), 4);
+    for (int i = 0; i < n; ++i) party_.push_back({ chars_[i].name, HP[i], HP[i], AT[i], DF[i], false });
+    if (party_.empty()) party_.push_back({ "Hero", 34, 34, 13, 6, false });
+    btlPhase_ = 0; btlCmd_ = 0; btlMember_ = firstLiving(0); btlMsg_.clear();
+    mode_ = Mode::Battle;
+    std::printf("[FFSmith] battle: %s (HP %d, atk %d, def %d) vs %zu party\n",
+                enemy_.name.c_str(), enemy_.hp, enemy_.atk, enemy_.def, party_.size());
+}
+
+void Host::updateBattle(const InputState& in) {
+    auto dmg = [](int atk, int def) { return std::max(1, atk - def / 2 + (std::rand() % 5 - 2)); };
+    if (btlPhase_ == 0) {                                   // pick a command for btlMember_
+        if (in.pressed & BTN_UP)   btlCmd_ = (btlCmd_ + 2) % 3;
+        if (in.pressed & BTN_DOWN) btlCmd_ = (btlCmd_ + 1) % 3;
+        if (in.pressed & BTN_CONFIRM) {
+            Combatant& a = party_[btlMember_];
+            if (btlCmd_ == 0) {                             // Attack
+                int d = dmg(a.atk, enemy_.def); enemy_.hp = std::max(0, enemy_.hp - d);
+                btlMsg_ = a.name + " attacks!  " + std::to_string(d) + " dmg"; btlPhase_ = 1;
+            } else if (btlCmd_ == 1) {                      // Defend
+                a.defending = true; btlMsg_ = a.name + " defends."; btlPhase_ = 1;
+            } else {                                        // Run
+                if (std::rand() % 2 == 0) { mode_ = Mode::Field; return; }
+                btlMsg_ = "Couldn't escape!"; btlPhase_ = 1;
+            }
+        }
+    } else if (btlPhase_ == 1) {                            // resolve player action
+        if (in.pressed & BTN_CONFIRM) {
+            if (enemy_.hp <= 0) { btlMsg_ = enemy_.name + " defeated! Victory!"; btlPhase_ = 3; return; }
+            int nx = firstLiving(btlMember_ + 1);
+            if (nx >= 0) { btlMember_ = nx; btlCmd_ = 0; btlPhase_ = 0; }
+            else {                                          // enemy turn
+                int t = firstLiving(0);
+                if (t < 0) { btlPhase_ = 4; return; }
+                Combatant& v = party_[t];
+                int d = dmg(enemy_.atk, v.def); if (v.defending) d = std::max(1, d / 2);
+                v.hp = std::max(0, v.hp - d);
+                btlMsg_ = enemy_.name + " hits " + v.name + "!  " + std::to_string(d) + " dmg"; btlPhase_ = 2;
+            }
+        }
+    } else if (btlPhase_ == 2) {                            // resolve enemy action -> new round
+        if (in.pressed & BTN_CONFIRM) {
+            if (!partyAlive()) { btlMsg_ = "Party wiped out..."; btlPhase_ = 4; return; }
+            for (auto& c : party_) c.defending = false;
+            btlMember_ = firstLiving(0); btlCmd_ = 0; btlPhase_ = 0;
+        }
+    } else {                                                // 3 = win, 4 = lose
+        if (in.pressed & BTN_CONFIRM) mode_ = Mode::Field;
+    }
+}
+
+void Host::renderBattle() {
+    int winW = 0, winH = 0; SDL_GetWindowSize(window_, &winW, &winH);
+    const int sc = cfg_.scale < 1 ? 1 : cfg_.scale;
+    int vw = winW / sc; if (vw < 16) vw = 16;
+    int vh = winH / sc; if (vh < 16) vh = 16;
+    SDL_RenderSetScale(renderer_, (float)sc, (float)sc);
+    int sceneH = vh - (fch_ * 5);
+    if (btlbgTex_) { SDL_Rect dst{ 0, 0, vw, sceneH }; SDL_RenderCopy(renderer_, btlbgTex_, nullptr, &dst); }
+    else { SDL_SetRenderDrawColor(renderer_, 26, 18, 38, 255); SDL_Rect r{ 0, 0, vw, sceneH }; SDL_RenderFillRect(renderer_, &r); }
+    SDL_SetRenderDrawColor(renderer_, 8, 10, 28, 255); SDL_Rect bp{ 0, sceneH, vw, vh - sceneH }; SDL_RenderFillRect(renderer_, &bp);
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    // enemy
+    int ebw = std::max((int)enemy_.name.size() * fcw_ + 18, 96);
+    int ebx = (vw - ebw) / 2, eby = 16, ebh = fch_ + 14;
+    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 160); SDL_Rect eb{ ebx, eby, ebw, ebh }; SDL_RenderFillRect(renderer_, &eb);
+    drawText(ebx + 8, eby + 3, enemy_.name, 40, 255, 210, 210);
+    int barW = ebw - 16, byy = eby + fch_ + 4;
+    SDL_SetRenderDrawColor(renderer_, 60, 30, 30, 255); SDL_Rect bg2{ ebx + 8, byy, barW, 4 }; SDL_RenderFillRect(renderer_, &bg2);
+    int fillw = enemy_.maxhp > 0 ? barW * std::max(0, enemy_.hp) / enemy_.maxhp : 0;
+    SDL_SetRenderDrawColor(renderer_, 220, 64, 64, 255); SDL_Rect bf{ ebx + 8, byy, fillw, 4 }; SDL_RenderFillRect(renderer_, &bf);
+    // party
+    int py = sceneH + 3;
+    for (size_t i = 0; i < party_.size(); ++i) {
+        const Combatant& c = party_[i];
+        int ty = py + (int)i * fch_;
+        if (btlPhase_ == 0 && (int)i == btlMember_) drawText(2, ty, ">", 2, 255, 240, 120);
+        std::string ln = c.name + "  " + std::to_string(std::max(0, c.hp)) + "/" + std::to_string(c.maxhp);
+        Uint8 g = c.hp > 0 ? 230 : 110, b = c.hp > 0 ? 255 : 110;
+        drawText(10, ty, ln, vw / 2 / (fcw_ > 0 ? fcw_ : 8), 235, g, b);
+    }
+    // command / message box (bottom-right)
+    int rx = vw / 2 + 2, ry = sceneH + 2, rw = vw / 2 - 6, rh = vh - sceneH - 4;
+    SDL_SetRenderDrawColor(renderer_, 12, 16, 48, 238); SDL_Rect cb{ rx, ry, rw, rh }; SDL_RenderFillRect(renderer_, &cb);
+    SDL_SetRenderDrawColor(renderer_, 235, 235, 255, 255); SDL_RenderDrawRect(renderer_, &cb);
+    if (btlPhase_ == 0) {
+        static const char* cmd[3] = { "Attack", "Defend", "Run" };
+        for (int i = 0; i < 3; ++i) {
+            int ty = ry + 4 + i * fch_;
+            if (i == btlCmd_) drawText(rx + 4, ty, ">", 2, 255, 240, 120);
+            drawText(rx + 13, ty, cmd[i], 10, 255, 255, 255);
+        }
+    } else {
+        drawText(rx + 6, ry + 5, btlMsg_, rw / (fcw_ > 0 ? fcw_ : 8) - 1, 235, 235, 200);
+        drawText(rx + rw - 3 * fcw_ - 5, ry + rh - fch_ - 3, "-Z-", 4, 150, 160, 200);
+    }
+}
+
+int Host::simBattle(int monsterId) {
+    startBattle(monsterId);
+    InputState c; c.pressed = BTN_CONFIRM;
+    int guard = 0, lastPhase = -1;
+    while (mode_ == Mode::Battle && guard++ < 600) {
+        if (btlPhase_ != lastPhase || !btlMsg_.empty()) {
+            std::printf("  [sim] phase=%d enemyHP=%2d  %s\n", btlPhase_, enemy_.hp, btlMsg_.c_str());
+            lastPhase = btlPhase_;
+        }
+        updateBattle(c);
+    }
+    std::printf("  [sim] ended in %d steps -> %s (enemyHP=%d, partyAlive=%d)\n",
+                guard, partyAlive() ? "VICTORY" : "DEFEAT", enemy_.hp, (int)partyAlive());
+    return partyAlive() ? 1 : 0;
 }
 
 bool Host::shotField(const std::string& path) {

@@ -14,6 +14,8 @@ namespace ffsmith {
 
 class Field;
 
+struct Combatant { std::string name; int hp = 0, maxhp = 0, atk = 0, def = 0; bool defending = false; };
+
 struct HostConfig {
     int logical_width  = 256;
     int logical_height = 176;
@@ -30,7 +32,7 @@ public:
     Host(const Host&)            = delete;
     Host& operator=(const Host&) = delete;
 
-    enum class Mode { Debug, Title, Field };
+    enum class Mode { Debug, Title, Field, Battle };
     struct DebugStart { std::string map; int img = -1, x = 0, y = 0, facing = 0; bool noclip = false; };
 
     bool init();
@@ -44,6 +46,8 @@ public:
     void openMenu() { menuOpen_ = true; menuCursor_ = 0; menuPage_ = 0; }
     bool loadMenuData(const std::string& bundleDir);   // data/items.bin + chars.bin
     void openMenuPage(int pg) { menuOpen_ = true; menuPage_ = pg; pageCursor_ = 0; pageScroll_ = 0; pageChar_ = 0; }
+    void startBattle(int monsterId);
+    int  simBattle(int monsterId);   // headless: auto-attack to the end (verification)
     bool loadTitle(const std::string& bundleDir);   // ui/title.tex
     void setDebugData(std::vector<std::string> maps, std::vector<int> sprites);
     void debugSelectMap(const std::string& key);
@@ -69,6 +73,10 @@ private:
     void renderMenu(int vw, int vh);
     void renderItemPage(int px, int py, int pw, int ph);
     void renderCharPage(int px, int py, int pw, int ph, bool status);
+    void updateBattle(const InputState& in);
+    void renderBattle();
+    int  firstLiving(int from) const;
+    bool partyAlive() const;
     void updateDebug(const InputState& in);
     void renderDebug();
     void drawText(int x, int y, const std::string& s, int maxChars, uint8_t r, uint8_t g, uint8_t b);
@@ -97,12 +105,19 @@ private:
     int  dbgRow_ = 0, dbgMapIdx_ = 0, dbgSprIdx_ = 0;
     int  dbgX_ = 0, dbgY_ = 0, dbgFacing_ = 0;
     bool dbgNoclip_ = false, dbgOverlay_ = false, dbgHud_ = true, dbgStart_ = false;
+    int  dbgScale_ = 3;
     bool overlayOn_ = false, hudOn_ = false;
     std::string mapKey_;
     std::unordered_map<int, Item> items_;
     std::vector<int> itemIds_;
     std::vector<CharRec> chars_;
     int menuPage_ = 0, pageCursor_ = 0, pageScroll_ = 0, pageChar_ = 0;
+    std::vector<Monster> monsters_;
+    Combatant enemy_;
+    std::vector<Combatant> party_;
+    int btlPhase_ = 0, btlCmd_ = 0, btlMember_ = 0;
+    std::string btlMsg_;
+    SDL_Texture* btlbgTex_ = nullptr;
     InputState    input_;
     uint32_t      raw_held_   = 0;
     uint32_t      held_prev_  = 0;

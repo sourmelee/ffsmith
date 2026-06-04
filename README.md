@@ -18,7 +18,8 @@ Companion to the Python **FFD/FFL Toolkit** (`../Python/`): the toolkit bakes ve
 - **M3b (dialogue) — real on-screen text: ✅ done.** SetMessage shows actual words in a bordered, word-wrapped, `\n`-aware dialogue box. Field dialogue is **per-area**: the engine loads `msg{N}.msd` (`ReadStoryMessageData`→`SetMessageList`→`FieldClass+0x380`), and maps select the bank by **group** (16 groups ↔ 16 banks). msg-file format: count + messages × 6 languages × 2 slots (text + speaker name); **English text = msg×12+2**. The toolkit bakes `text/msg{group}.bin` + a font atlas; the engine loads the right bank per map (reloading on warp). Verified via `--fieldshot --open-msg`: m501's NPC (msg 170) shows “Hey, Hero…”, m500's cutscene wraps across lines. *(An earlier cut used system_message.msd §4 — a coincidentally-coherent but wrong source; corrected to the real `msg{N}` banks.)*
 - **M4 (state machine) — title → field → menu: ✅ done.** A top-level mode machine (mirroring `GameClass::MainFunc`: Boot/Title/Field/Battle, with Menu/Dialog as **overlays**) boots to a real title screen (`TitleLogo`), enters the field on **Start/Z**, and opens a cursor menu (Item/Equip/Status/Save/Quit) over the **paused** field (**Enter** open, **X** close; Quit exits). `ChangeMainFunc` = current/next-mode + scene Init/Exec/End. Verified via `--title` / `--menu` screenshots. Battle (mode 4) is stubbed for M6.
 - **M5 (menu pages) — Item / Equip / Status: ✅ (core).** The field menu's pages show **real decoded data**: a scrollable 500-item list with descriptions (**Item**), and each of the 21 roster characters with their actual equipment resolved to item names (**Equip**) and stat descriptions (**Status**) — e.g. Sol with Orichalcum (ATK 23). Baked from `system_message.msd` + `boot_data` + `chara_set.dat`; navigated with the cursor (Item: ↑↓ + L/R ±10; Equip/Status: ←→ cycle character; X back). Verified by screenshot (`--menupage 1|2|3`). Save is a stub (needs save state); Quit exits.
-- **Next:** **M6** battle engine (`BattleClass` turn loop + damage); plus menu polish (use/equip actions need party + save state) and the field follow-ups (story-state dialogue banks, `<chaN>` party names, range triggers, common/auto events).
+- **M6 (battle) — turn-based scaffold: ✅ (step 1).** A real battle mode: a battle scene (real **battle background**) with a **real enemy from the monster table** (name + HP/attack/defense, e.g. Goblin 21/10/3), the **named party** (Sol/Aigis/Dusk/Sarah from `chara_set`) with HP bars, and a turn loop — **Attack / Defend / Run**, damage calc, enemy turns, win/lose. Start with the field hotkey **B** (random encounter) or `--battle N`; verified headless with `--battlesim N` (Goblin → Victory in 5 steps). *Scaffold: party stats are placeholder — real stats, ATB, abilities/magic, the exact damage formula, and encounters/rewards are M6 cont.*
+- **Next:** flesh out **M6** (real party stats from jobs/level, ATB turn order, abilities/magic, exact damage formula, encounter tables + rewards), then **M7** save/load.
 
 Full plan and the reverse-engineering map: **`ENGINE_RE_ROADMAP.md`**.
 
@@ -69,8 +70,8 @@ ffsmith --bundle out_bundle --map g0_p0_m501
 
 By default FFSmith boots into a **debug launcher** (no `--map` needed — it lists the
 bundle's maps): choose the **map**, the **character** (player `fldchr` sprite),
-the **spawn tile** (X/Y) and **facing**, and toggle **No-clip**, **Collision**
-overlay, and the **HUD**; **START** drops you into the field.
+the **spawn tile** (X/Y) and **facing**, toggle **No-clip**, **Collision** overlay and the
+**HUD**, and set **Scale** (zoom); **START** drops you into the field.
 
 ```sh
 ffsmith --bundle out_bundle            # -> debug launcher
@@ -82,7 +83,7 @@ In the launcher: **arrows** move the cursor / change a value, **L/R (Q/E)** jump
 10 through long map & character lists, **Z** toggles or activates **START**.
 
 In the field, debug hotkeys: **F1** back to the launcher, **F2** no-clip, **F3**
-collision overlay, **F4** HUD. The HUD shows `map (x,y) facing`.
+collision overlay, **F4** HUD, **-/+** zoom, **B** test battle. The HUD shows `map (x,y) facing`.
 
 A window opens; **arrows / WASD** walk the player (yellow marker), the camera
 follows, **Esc** quits. Big maps make big windows — use `--scale 1` or `2`.

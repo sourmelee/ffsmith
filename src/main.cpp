@@ -85,7 +85,7 @@ int main(int argc, char** argv) {
     int openMsg = -1, openCnt = 1;
     bool startTitle = false, openMenuFlag = false;
     bool debugMode = false, dbgNoclip = false, dbgOverlay = false, dbgHud = false;
-    int menuPageFlag = 0;
+    int menuPageFlag = 0, battleMon = -1, battleSim = -1;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
         if      (!std::strcmp(a, "--bundle")) bundle = takeStr(argc, argv, i, "");
@@ -101,6 +101,8 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--title")) startTitle = true;
         else if (!std::strcmp(a, "--menu"))  openMenuFlag = true;
         else if (!std::strcmp(a, "--menupage")) menuPageFlag = takeInt(argc, argv, i, 0);
+        else if (!std::strcmp(a, "--battle")) battleMon = takeInt(argc, argv, i, 1);
+        else if (!std::strcmp(a, "--battlesim")) battleSim = takeInt(argc, argv, i, 1);
         else if (!std::strcmp(a, "--debug")) debugMode = true;
         else if (!std::strcmp(a, "--noclip")) dbgNoclip = true;
         else if (!std::strcmp(a, "--overlay")) dbgOverlay = true;
@@ -204,6 +206,8 @@ int main(int argc, char** argv) {
     host.setViewFlags(dbgOverlay, dbgHud);
     if (dbgNoclip) field->setNoClip(true);
     if (debugMode) host.setMode(Host::Mode::Debug);
+    if (battleMon >= 0) host.startBattle(battleMon);
+    if (battleSim >= 0) { host.simBattle(battleSim); return 0; }
 
     if (!fieldshot.empty()) {
         if (face >= 0) { InputState in; in.held = (uint32_t)(face==0?BTN_DOWN:face==1?BTN_UP:face==2?BTN_LEFT:BTN_RIGHT); field->update(in); }
