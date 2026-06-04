@@ -77,6 +77,9 @@ private:
     void renderBattle();
     int  firstLiving(int from) const;
     bool partyAlive() const;
+    int  firstLivingEnemy(int from) const;
+    bool enemiesAlive() const;
+    void doEnemyAttack();
     void updateDebug(const InputState& in);
     void renderDebug();
     void drawText(int x, int y, const std::string& s, int maxChars, uint8_t r, uint8_t g, uint8_t b);
@@ -113,7 +116,8 @@ private:
     std::vector<CharRec> chars_;
     int menuPage_ = 0, pageCursor_ = 0, pageScroll_ = 0, pageChar_ = 0;
     std::vector<Monster> monsters_;
-    Combatant enemy_;
+    std::vector<Combatant> enemies_;
+    int target_ = 0, enemyActor_ = 0;
     std::vector<Combatant> party_;
     int btlPhase_ = 0, btlCmd_ = 0, btlMember_ = 0;
     std::string btlMsg_;

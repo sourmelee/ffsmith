@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <memory>
 #include <string>
 #include <vector>
@@ -78,6 +79,7 @@ static void dump_events(const FfMap& m, int tile) {
 
 int main(int argc, char** argv) {
     SDL_SetMainReady();
+    std::srand((unsigned)std::time(nullptr));
     HostConfig cfg;
     std::string bundle, map, shot, walk, fieldshot;
     bool events_mode = false;

@@ -222,6 +222,11 @@ std::vector<CharRec> load_chars(const std::string& path) {
         c.name.assign((const char*)&buf[o], nl); o += nl;
         if (o + 12 > buf.size()) break;
         for (int k = 0; k < 6; ++k) { c.equip[k] = rd_u16(&buf[o]); o += 2; }
+        if (o + 12 <= buf.size()) {                 // appended: job,level (u8) + STR/SPD/VIT/INT/MND (u16)
+            c.job = buf[o]; c.level = buf[o + 1]; o += 2;
+            c.str = rd_u16(&buf[o]); c.spd = rd_u16(&buf[o + 2]); c.vit = rd_u16(&buf[o + 4]);
+            c.intl = rd_u16(&buf[o + 6]); c.mnd = rd_u16(&buf[o + 8]); o += 10;
+        }
         out.push_back(std::move(c));
     }
     return out;

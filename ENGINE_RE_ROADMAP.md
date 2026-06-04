@@ -224,7 +224,7 @@ Player walks a real map with correct tile collision, map-edge behavior (wrap vs.
 | M3 | **VM + NPCs + dialogue + sprites + step-on triggers + warps + real dialogue text** ✅ (door/edge warps via script-var idiom; field text from `system_message.msd`); **M4 = next** | talk + warp round-trip + on-screen text (msg 170/150) verified |
 | M4 | **✅ Game state machine** (mode dispatch mirroring `GameClass::MainFunc`: Boot/Title/Field/Battle; Menu/Dialog = overlays) | title (real `TitleLogo`) → field (Start/Z) → menu overlay (Enter/X) verified by screenshot |
 | M5 | **◑ Menu pages** — Item/Equip/Status show real baked data (items + roster + equipment); use/equip **actions** need party+save (M5 cont.) | screenshots: 500-item list, Sol's Orichalcum, ATK 23 |
-| M6 | **◑ Battle scaffold** — turn-based loop (Attack/Defend/Run), real enemy from the monster table, named party, HP/win-lose; real stats + ATB + magic + exact formula = M6 cont. | `--battlesim 1` Goblin→Victory; battle screenshot |
+| M6 | **◑ Battle** — turn-based loop (Attack/Defend/Run) vs a **group** of 1-3 real enemies (difficulty-banded, dup-name A/B) with **target select** + per-enemy turns, named party, HP/win-lose; real stats + ATB + magic + exact formula = M6 cont. | `--battlesim`: Goblin+Wererat→Victory; 3-enemy group screenshot |
 | M7 | Save/load | round-trip a save |
 
 M2 is the immediate objective; everything in Part 3 precedes it.
