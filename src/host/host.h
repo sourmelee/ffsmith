@@ -14,7 +14,7 @@ namespace ffsmith {
 
 class Field;
 
-struct Combatant { std::string name; int hp = 0, maxhp = 0, atk = 0, def = 0; bool defending = false; };
+struct Combatant { std::string name; int hp = 0, maxhp = 0, atk = 0, def = 0; bool defending = false; int spd = 8, atb = 0, mp = 0, maxmp = 0, intl = 0, mnd = 0; };
 
 struct HostConfig {
     int logical_width  = 256;
@@ -48,6 +48,7 @@ public:
     void openMenuPage(int pg) { menuOpen_ = true; menuPage_ = pg; pageCursor_ = 0; pageScroll_ = 0; pageChar_ = 0; }
     void startBattle(int monsterId);
     int  simBattle(int monsterId);   // headless: auto-attack to the end (verification)
+    void debugOpenMagic();           // debug: open the Magic spell menu for a screenshot
     bool loadTitle(const std::string& bundleDir);   // ui/title.tex
     void setDebugData(std::vector<std::string> maps, std::vector<int> sprites);
     void debugSelectMap(const std::string& key);
@@ -80,6 +81,10 @@ private:
     int  firstLivingEnemy(int from) const;
     bool enemiesAlive() const;
     void doEnemyAttack();
+    void pickNextActor();
+    void beginNextTurn();
+    void buildSpellList();
+    void castOn(int targetIsEnemy, int idx);
     void updateDebug(const InputState& in);
     void renderDebug();
     void drawText(int x, int y, const std::string& s, int maxChars, uint8_t r, uint8_t g, uint8_t b);
@@ -120,6 +125,11 @@ private:
     int target_ = 0, enemyActor_ = 0;
     std::vector<Combatant> party_;
     int btlPhase_ = 0, btlCmd_ = 0, btlMember_ = 0;
+    bool curIsEnemy_ = false;
+    int  curIdx_ = 0;
+    std::vector<Spell> spells_;
+    std::vector<int> spellList_;
+    int btlSpellSel_ = 0, pendingSpell_ = -1;
     std::string btlMsg_;
     SDL_Texture* btlbgTex_ = nullptr;
     InputState    input_;

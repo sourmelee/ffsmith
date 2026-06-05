@@ -49,10 +49,12 @@ std::vector<int>         list_sprites(const std::string& bundleDir);  // unique 
 
 struct Item    { int id = 0; std::string name, desc; };
 struct CharRec { int id = 0; std::string name; int equip[6] = {0,0,0,0,0,0};
-                 int job = 0, level = 1, str = 0, spd = 0, vit = 0, intl = 0, mnd = 0; };
+                 int job = 0, level = 1, str = 0, spd = 0, vit = 0, intl = 0, mnd = 0, hp = 0, mp = 0; };
 std::vector<Item>    load_items(const std::string& path);   // data/items.bin
 std::vector<CharRec> load_chars(const std::string& path);   // data/chars.bin
 struct Monster { int id = 0; std::string name; int hp = 0, atk = 0, def = 0, level = 1; };
 std::vector<Monster> load_monsters(const std::string& path);  // data/monsters.bin
+struct Spell { int id = 0, type = 0, mp = 0, power = 0; std::string name; };  // type 0=dmg,1=heal
+std::vector<Spell> load_spells(const std::string& path);  // data/spells.bin
 
 }  // namespace ffsmith

@@ -226,6 +226,7 @@ std::vector<CharRec> load_chars(const std::string& path) {
             c.job = buf[o]; c.level = buf[o + 1]; o += 2;
             c.str = rd_u16(&buf[o]); c.spd = rd_u16(&buf[o + 2]); c.vit = rd_u16(&buf[o + 4]);
             c.intl = rd_u16(&buf[o + 6]); c.mnd = rd_u16(&buf[o + 8]); o += 10;
+            if (o + 4 <= buf.size()) { c.hp = rd_u16(&buf[o]); c.mp = rd_u16(&buf[o + 2]); o += 4; }
         }
         out.push_back(std::move(c));
     }
@@ -244,6 +245,22 @@ std::vector<Monster> load_monsters(const std::string& path) {
         if (o + 7 > buf.size()) break;
         m.hp = rd_u16(&buf[o]); m.atk = rd_u16(&buf[o + 2]); m.def = rd_u16(&buf[o + 4]); m.level = buf[o + 6]; o += 7;
         out.push_back(std::move(m));
+    }
+    return out;
+}
+
+std::vector<Spell> load_spells(const std::string& path) {
+    std::vector<Spell> out; auto buf = read_file(path);
+    if (buf.size() < 8 || std::memcmp(buf.data(), "FSPL", 4) != 0) return out;
+    uint32_t n = rd_u32(&buf[4]); size_t o = 8;
+    for (uint32_t i = 0; i < n; ++i) {
+        if (o + 9 > buf.size()) break;
+        Spell sp; sp.id = rd_u16(&buf[o]); sp.type = buf[o + 2];
+        sp.mp = rd_u16(&buf[o + 3]); sp.power = rd_u16(&buf[o + 5]);
+        int nl = rd_u16(&buf[o + 7]); o += 9;
+        if (o + (size_t)nl > buf.size()) break;
+        sp.name.assign((const char*)&buf[o], nl); o += nl;
+        out.push_back(std::move(sp));
     }
     return out;
 }

@@ -473,7 +473,7 @@ void Host::renderCharPage(int px, int py, int pw, int ph, bool status) {
     std::string hdr = "<  " + c.name + "  >   (" + std::to_string(pageChar_ + 1) + "/" + std::to_string(chars_.size()) + ")";
     drawText(px + 8, py + 22, hdr, maxChars, 255, 255, 160);
     if (status) {
-        drawText(px + 10, py + 42,             "Lv " + std::to_string(c.level) + "    Job " + std::to_string(c.job), maxChars, 235, 235, 255);
+        drawText(px + 10, py + 42, "Lv " + std::to_string(c.level) + "   HP " + std::to_string(c.hp) + "   MP " + std::to_string(c.mp), maxChars, 235, 235, 255);
         drawText(px + 10, py + 42 + fch_ * 2,  "STR " + std::to_string(c.str) + "      SPD " + std::to_string(c.spd), maxChars, 230, 235, 255);
         drawText(px + 10, py + 42 + fch_ * 3,  "VIT " + std::to_string(c.vit) + "   INT " + std::to_string(c.intl) + "   MND " + std::to_string(c.mnd), maxChars, 230, 235, 255);
         int w0 = c.equip[0];
@@ -496,6 +496,7 @@ bool Host::loadMenuData(const std::string& dir) {
     for (auto& it : items) { itemIds_.push_back(it.id); items_[it.id] = std::move(it); }
     chars_ = load_chars(dir + "/data/chars.bin");
     monsters_ = load_monsters(dir + "/data/monsters.bin");
+    spells_ = load_spells(dir + "/data/spells.bin");
     Texture bg = load_tex(dir + "/ui/btlbg.tex");
     if (bg.valid() && renderer_) {
         if (btlbgTex_) SDL_DestroyTexture(btlbgTex_);
@@ -612,6 +613,63 @@ void Host::doEnemyAttack() {
     btlPhase_ = 2;
 }
 
+void Host::buildSpellList() {
+    spellList_.clear();
+    if (btlMember_ < 0 || btlMember_ >= (int)party_.size()) return;
+    const Combatant& m = party_[btlMember_];
+    for (int i = 0; i < (int)spells_.size(); ++i) {
+        const Spell& sp = spells_[i];
+        bool known = (sp.type == 1 && m.mnd >= 2) || (sp.type == 0 && m.intl >= 2);
+        if (known && sp.mp <= m.mp) spellList_.push_back(i);
+    }
+}
+
+void Host::castOn(int targetIsEnemy, int idx) {
+    (void)targetIsEnemy;
+    if (pendingSpell_ < 0 || pendingSpell_ >= (int)spells_.size()) { btlPhase_ = 1; return; }
+    Combatant& caster = party_[btlMember_];
+    const Spell& sp = spells_[pendingSpell_];
+    caster.mp = std::max(0, caster.mp - sp.mp);
+    if (sp.type == 0) {                                      // damage (INT-scaled)
+        Combatant& t = enemies_[idx];
+        int d = std::max(1, sp.power + caster.intl * 2 + (std::rand() % 7 - 3));
+        t.hp = std::max(0, t.hp - d);
+        btlMsg_ = caster.name + " casts " + sp.name + "!  " + std::to_string(d) + " dmg";
+    } else {                                                // heal (MND-scaled)
+        Combatant& t = party_[idx];
+        int hgain = sp.power + caster.mnd * 2;
+        t.hp = std::min(t.maxhp, t.hp + hgain);
+        btlMsg_ = caster.name + " casts " + sp.name + " on " + t.name + "!  +" + std::to_string(hgain) + " HP";
+    }
+    pendingSpell_ = -1;
+    btlPhase_ = 1;
+}
+
+void Host::pickNextActor() {
+    const int THRESH = 256;
+    for (int guard = 0; guard < 200000; ++guard) {
+        for (auto& c : party_)   if (c.hp > 0) c.atb += std::max(1, c.spd);
+        for (auto& e : enemies_) if (e.hp > 0) e.atb += std::max(1, e.spd);
+        int best = -1, bestVal = THRESH - 1; bool be = false;
+        for (int i = 0; i < (int)party_.size(); ++i)
+            if (party_[i].hp > 0 && party_[i].atb > bestVal) { bestVal = party_[i].atb; best = i; be = false; }
+        for (int i = 0; i < (int)enemies_.size(); ++i)
+            if (enemies_[i].hp > 0 && enemies_[i].atb > bestVal) { bestVal = enemies_[i].atb; best = i; be = true; }
+        if (best >= 0) { curIsEnemy_ = be; curIdx_ = best; (be ? enemies_[best].atb : party_[best].atb) -= THRESH; return; }
+    }
+    curIsEnemy_ = false; curIdx_ = std::max(0, firstLiving(0));
+}
+
+void Host::beginNextTurn() {
+    pickNextActor();
+    if (curIsEnemy_) { enemyActor_ = curIdx_; doEnemyAttack(); }    // -> phase 2 + message
+    else {
+        btlMember_ = curIdx_;
+        if (btlMember_ >= 0 && btlMember_ < (int)party_.size()) party_[btlMember_].defending = false;
+        btlCmd_ = 0; btlPhase_ = 0;
+    }
+}
+
 void Host::startBattle(int leadId) {
     enemies_.clear();
     const Monster* lead = nullptr;
@@ -623,7 +681,7 @@ void Host::startBattle(int leadId) {
         lead = weak[std::rand() % (int)weak.size()];
     }
     if (!lead) return;
-    auto push = [&](const Monster* m) { enemies_.push_back({ m->name, m->hp, m->hp, m->atk, m->def, false }); };
+    auto push = [&](const Monster* m) { enemies_.push_back({ m->name, m->hp, m->hp, m->atk, m->def, false, 7, 0 }); };
     push(lead);
     // Group extras = monsters of SIMILAR difficulty to the lead (attack band + hp cap), so a
     // Goblin pack never pulls in a Mud Golem.  The monster `level` field is not a reliable
@@ -644,15 +702,19 @@ void Host::startBattle(int leadId) {
     int n = std::min((int)chars_.size(), 4);
     for (int i = 0; i < n; ++i) {
         const CharRec& c = chars_[i];
-        int hp  = 28 + c.level * 2 + c.vit * 4;     // HP derived (real max-HP needs SetJobStatus)
-        int atk = std::max(2, c.str);               // attack = real STR
+        int hp  = c.hp > 0 ? c.hp : (28 + c.level * 2 + c.vit * 4);  // real max-HP from the growth table
+        int atk = std::max(2, c.str);                                // attack = real STR
         int def = std::max(2, c.vit + c.level / 2);
-        party_.push_back({ c.name, hp, hp, atk, def, false });
+        party_.push_back({ c.name, hp, hp, atk, def, false, std::max(1, c.spd), 0 });  // spd = real SPD
+        party_.back().mp = party_.back().maxmp = c.mp; party_.back().intl = c.intl; party_.back().mnd = c.mnd;
     }
-    if (party_.empty()) party_.push_back({ "Hero", 34, 34, 13, 6, false });
+    if (party_.empty()) party_.push_back({ "Hero", 34, 34, 13, 6, false, 8, 0 });
     target_ = firstLivingEnemy(0); enemyActor_ = 0;
-    btlPhase_ = 0; btlCmd_ = 0; btlMember_ = firstLiving(0); btlMsg_.clear();
+    for (auto& c : party_)   c.atb = std::rand() % 256;     // stagger initial ATB gauges
+    for (auto& e : enemies_) e.atb = std::rand() % 256;
+    btlCmd_ = 0; btlMsg_.clear();
     mode_ = Mode::Battle;
+    beginNextTurn();                                        // ATB chooses who acts first
     std::printf("[FFSmith] battle: %zu enemies (lead %s) vs %zu party\n",
                 enemies_.size(), enemies_.empty() ? "?" : enemies_[0].name.c_str(), party_.size());
 }
@@ -664,11 +726,12 @@ void Host::updateBattle(const InputState& in) {
         for (int i = (int)enemies_.size() - 1; i >= 0; --i) if (enemies_[i].hp > 0) return i;
         return from;
     };
-    if (btlPhase_ == 0) {                                    // command
-        if (in.pressed & BTN_UP)   btlCmd_ = (btlCmd_ + 2) % 3;
-        if (in.pressed & BTN_DOWN) btlCmd_ = (btlCmd_ + 1) % 3;
+    if (btlPhase_ == 0) {                                    // command: Attack / Magic / Defend / Run
+        if (in.pressed & BTN_UP)   btlCmd_ = (btlCmd_ + 3) % 4;
+        if (in.pressed & BTN_DOWN) btlCmd_ = (btlCmd_ + 1) % 4;
         if (in.pressed & BTN_CONFIRM) {
-            if (btlCmd_ == 0) {                              // Attack -> target select (auto if one)
+            if (btlCmd_ == 0) {                              // Attack -> target (auto if one)
+                pendingSpell_ = -1;
                 target_ = firstLivingEnemy(0);
                 int living = 0; for (const auto& e : enemies_) if (e.hp > 0) living++;
                 if (living <= 1) {
@@ -677,36 +740,56 @@ void Host::updateBattle(const InputState& in) {
                     btlMsg_ = a.name + " -> " + enemies_[target_].name + "   " + std::to_string(d) + " dmg";
                     btlPhase_ = 1;
                 } else btlPhase_ = 5;
-            } else if (btlCmd_ == 1) {
+            } else if (btlCmd_ == 1) {                       // Magic
+                buildSpellList();
+                if (!spellList_.empty()) { btlSpellSel_ = 0; btlPhase_ = 6; }
+                else { btlMsg_ = party_[btlMember_].name + " has no spell to cast."; btlPhase_ = 1; }
+            } else if (btlCmd_ == 2) {                       // Defend
                 party_[btlMember_].defending = true; btlMsg_ = party_[btlMember_].name + " defends."; btlPhase_ = 1;
-            } else {
+            } else {                                         // Run
                 if (std::rand() % 2 == 0) { mode_ = Mode::Field; return; }
                 btlMsg_ = "Couldn't escape!"; btlPhase_ = 1;
             }
         }
-    } else if (btlPhase_ == 5) {                             // target selection
+    } else if (btlPhase_ == 6) {                             // spell select
+        int n = (int)spellList_.size();
+        if (n > 0) {
+            if (in.pressed & BTN_UP)   btlSpellSel_ = (btlSpellSel_ + n - 1) % n;
+            if (in.pressed & BTN_DOWN) btlSpellSel_ = (btlSpellSel_ + 1) % n;
+        }
+        if (in.pressed & BTN_CANCEL) btlPhase_ = 0;
+        if ((in.pressed & BTN_CONFIRM) && n > 0) {
+            pendingSpell_ = spellList_[btlSpellSel_];
+            if (spells_[pendingSpell_].type == 0) { target_ = firstLivingEnemy(0); btlPhase_ = 5; }
+            else {
+                int lo = -1, loHp = 1 << 30;
+                for (int i = 0; i < (int)party_.size(); ++i)
+                    if (party_[i].hp > 0 && party_[i].hp < loHp) { loHp = party_[i].hp; lo = i; }
+                castOn(0, lo >= 0 ? lo : btlMember_);
+            }
+        }
+        } else if (btlPhase_ == 5) {                             // target selection
         if (in.pressed & (BTN_RIGHT | BTN_DOWN)) { int t = firstLivingEnemy(target_ + 1); target_ = (t >= 0) ? t : firstLivingEnemy(0); }
         if (in.pressed & (BTN_LEFT | BTN_UP))    target_ = prevLivingEnemy(target_);
         if (in.pressed & BTN_CANCEL) btlPhase_ = 0;
         if (in.pressed & BTN_CONFIRM) {
-            Combatant& a = party_[btlMember_]; int d = dmg(a.atk, enemies_[target_].def);
-            enemies_[target_].hp = std::max(0, enemies_[target_].hp - d);
-            btlMsg_ = a.name + " -> " + enemies_[target_].name + "   " + std::to_string(d) + " dmg";
-            btlPhase_ = 1;
+            if (pendingSpell_ >= 0) { castOn(1, target_); }
+            else {
+                Combatant& a = party_[btlMember_]; int d = dmg(a.atk, enemies_[target_].def);
+                enemies_[target_].hp = std::max(0, enemies_[target_].hp - d);
+                btlMsg_ = a.name + " -> " + enemies_[target_].name + "   " + std::to_string(d) + " dmg";
+                btlPhase_ = 1;
+            }
         }
     } else if (btlPhase_ == 1) {                             // resolve player action
         if (in.pressed & BTN_CONFIRM) {
             if (!enemiesAlive()) { btlMsg_ = "Victory!"; btlPhase_ = 3; return; }
-            int nx = firstLiving(btlMember_ + 1);
-            if (nx >= 0) { btlMember_ = nx; btlCmd_ = 0; btlPhase_ = 0; }
-            else { enemyActor_ = firstLivingEnemy(0); doEnemyAttack(); }
+            beginNextTurn();
         }
     } else if (btlPhase_ == 2) {                             // resolve enemy action
         if (in.pressed & BTN_CONFIRM) {
             if (!partyAlive()) { btlMsg_ = "Party wiped out..."; btlPhase_ = 4; return; }
-            int ne = firstLivingEnemy(enemyActor_ + 1);
-            if (ne >= 0) { enemyActor_ = ne; doEnemyAttack(); }
-            else { for (auto& c : party_) c.defending = false; btlMember_ = firstLiving(0); btlCmd_ = 0; btlPhase_ = 0; }
+            beginNextTurn();
         }
     } else {                                                 // 3 win / 4 lose
         if (in.pressed & BTN_CONFIRM) mode_ = Mode::Field;
@@ -744,7 +827,7 @@ void Host::renderBattle() {
         const Combatant& c = party_[i];
         int ty = py + (int)i * fch_;
         if (btlPhase_ == 0 && (int)i == btlMember_) drawText(2, ty, ">", 2, 255, 240, 120);
-        std::string ln = c.name + "  " + std::to_string(std::max(0, c.hp)) + "/" + std::to_string(c.maxhp);
+        std::string ln = c.name + " " + std::to_string(std::max(0, c.hp)) + "/" + std::to_string(c.maxhp) + (c.maxmp > 0 ? "  M" + std::to_string(c.mp) : "");
         Uint8 g = c.hp > 0 ? 230 : 110, b = c.hp > 0 ? 255 : 110;
         drawText(10, ty, ln, vw / 2 / (fcw_ > 0 ? fcw_ : 8), 235, g, b);
     }
@@ -752,11 +835,19 @@ void Host::renderBattle() {
     SDL_SetRenderDrawColor(renderer_, 12, 16, 48, 238); SDL_Rect cb{ rx, ry, rw, rh }; SDL_RenderFillRect(renderer_, &cb);
     SDL_SetRenderDrawColor(renderer_, 235, 235, 255, 255); SDL_RenderDrawRect(renderer_, &cb);
     if (btlPhase_ == 0) {
-        static const char* cmd[3] = { "Attack", "Defend", "Run" };
-        for (int i = 0; i < 3; ++i) {
-            int ty = ry + 4 + i * fch_;
+        static const char* cmd[4] = { "Attack", "Magic", "Defend", "Run" };
+        for (int i = 0; i < 4; ++i) {
+            int ty = ry + 3 + i * fch_;
             if (i == btlCmd_) drawText(rx + 4, ty, ">", 2, 255, 240, 120);
             drawText(rx + 13, ty, cmd[i], 10, 255, 255, 255);
+        }
+    } else if (btlPhase_ == 6) {
+        int start = std::max(0, btlSpellSel_ - 4);
+        for (int i = start; i < (int)spellList_.size() && i < start + 5; ++i) {
+            const Spell& sp = spells_[spellList_[i]];
+            int ty = ry + 3 + (i - start) * fch_;
+            if (i == btlSpellSel_) drawText(rx + 3, ty, ">", 2, 255, 240, 120);
+            drawText(rx + 11, ty, sp.name + " " + std::to_string(sp.mp), rw / (fcw_ > 0 ? fcw_ : 8) - 1, 200, 220, 255);
         }
     } else if (btlPhase_ == 5) {
         drawText(rx + 6, ry + 5, "Target:", 12, 235, 235, 200);
@@ -766,6 +857,11 @@ void Host::renderBattle() {
         drawText(rx + 6, ry + 5, btlMsg_, rw / (fcw_ > 0 ? fcw_ : 8) - 1, 235, 235, 200);
         drawText(rx + rw - 3 * fcw_ - 5, ry + rh - fch_ - 3, "-Z-", 4, 150, 160, 200);
     }
+}
+
+void Host::debugOpenMagic() {
+    btlMember_ = 0;
+    if (!party_.empty()) { buildSpellList(); btlSpellSel_ = 0; btlPhase_ = 6; curIsEnemy_ = false; }
 }
 
 int Host::simBattle(int monsterId) {
