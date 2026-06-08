@@ -206,6 +206,7 @@ std::vector<Item> load_items(const std::string& path) {
         int dl = rd_u16(&buf[o]); o += 2;
         if (o + (size_t)dl > buf.size()) break;
         it.desc.assign((const char*)&buf[o], dl); o += dl;
+        if (o + 4 <= buf.size()) { it.atk = rd_u16(&buf[o]); it.def = rd_u16(&buf[o + 2]); o += 4; }
         out.push_back(std::move(it));
     }
     return out;

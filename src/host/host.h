@@ -14,7 +14,7 @@ namespace ffsmith {
 
 class Field;
 
-struct Combatant { std::string name; int hp = 0, maxhp = 0, atk = 0, def = 0; bool defending = false; int spd = 8, atb = 0, mp = 0, maxmp = 0, intl = 0, mnd = 0; };
+struct Combatant { std::string name; int hp = 0, maxhp = 0, atk = 0, def = 0; bool defending = false; int spd = 8, atb = 0, mp = 0, maxmp = 0, intl = 0, mnd = 0, wpn = 4, level = 1; };
 
 struct HostConfig {
     int logical_width  = 256;
@@ -85,6 +85,7 @@ private:
     void beginNextTurn();
     void buildSpellList();
     void castOn(int targetIsEnemy, int idx);
+    int  physDamage(const Combatant& a, const Combatant& d) const;
     void updateDebug(const InputState& in);
     void renderDebug();
     void drawText(int x, int y, const std::string& s, int maxChars, uint8_t r, uint8_t g, uint8_t b);

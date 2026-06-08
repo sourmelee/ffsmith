@@ -606,8 +606,7 @@ void Host::doEnemyAttack() {
     if (alive.empty() || enemyActor_ < 0 || enemyActor_ >= (int)enemies_.size()) { btlPhase_ = 4; return; }
     Combatant& e = enemies_[enemyActor_];
     Combatant& v = party_[alive[std::rand() % alive.size()]];
-    int raw = e.atk * 2 + (std::rand() % (std::max(1, e.atk) + 1));
-    int d = std::max(1, raw / 2 - v.def);
+    int d = physDamage(e, v);
     if (v.defending) d = std::max(1, d / 2);
     v.hp = std::max(0, v.hp - d);
     btlMsg_ = e.name + " -> " + v.name + "   " + std::to_string(d) + " dmg";
@@ -646,6 +645,18 @@ void Host::castOn(int targetIsEnemy, int idx) {
     btlPhase_ = 1;
 }
 
+int Host::physDamage(const Combatant& a, const Combatant& d) const {
+    // Decoded core of BattleClass::CalcPhysicAttackDmg via the BTLACT map: an attack term
+    // (weaponPower W<<6) + random spread, minus full defense (D<<6), scaled by the
+    // (3*attackStat + level) power factor and >>0xc (the engine's ×4 / 4096).
+    int W = std::max(1, a.wpn), A = std::max(1, a.atk), L = a.level, D = d.def;
+    int attackTerm = W * 64;
+    int spread = std::rand() % (std::max(128, W * 64 / 20) + 1);
+    int afterDef = std::max(0, attackTerm + spread - D * 64);
+    int powerFac = 3 * A + L;
+    return std::max(1, afterDef * powerFac / 1024);
+}
+
 void Host::pickNextActor() {
     const int THRESH = 256;
     for (int guard = 0; guard < 200000; ++guard) {
@@ -682,7 +693,14 @@ void Host::startBattle(int leadId) {
         lead = weak[std::rand() % (int)weak.size()];
     }
     if (!lead) return;
-    auto push = [&](const Monster* m) { enemies_.push_back({ m->name, m->hp, m->hp, m->atk, m->def, false, 7, 0 }); };
+    auto push = [&](const Monster* m) {
+        Combatant e; e.name = m->name; e.hp = e.maxhp = m->hp;
+        e.atk = std::max(1, m->atk);      // A = monster attack stat (BTLACT 0x3c)
+        e.wpn = 5 + m->level;             // W = small innate weapon power (no equipment)
+        e.def = std::max(1, m->def);      // D (BTLACT 0x58)
+        e.level = m->level; e.spd = 7;
+        enemies_.push_back(e);
+    };
     push(lead);
     // Group extras = monsters of SIMILAR difficulty to the lead (attack band + hp cap), so a
     // Goblin pack never pulls in a Mud Golem.  The monster `level` field is not a reliable
@@ -703,13 +721,20 @@ void Host::startBattle(int leadId) {
     int n = std::min((int)chars_.size(), 4);
     for (int i = 0; i < n; ++i) {
         const CharRec& c = chars_[i];
-        int hp  = c.hp > 0 ? c.hp : (28 + c.level * 2 + c.vit * 4);  // real max-HP from the growth table
-        int atk = std::max(2, c.str);                                // attack = real STR
-        int def = std::max(2, c.vit + c.level / 2);
-        party_.push_back({ c.name, hp, hp, atk, def, false, std::max(1, c.spd), 0 });  // spd = real SPD
-        party_.back().mp = party_.back().maxmp = c.mp; party_.back().intl = c.intl; party_.back().mnd = c.mnd;
+        int weaponAtk = (c.equip[0] > 0 && items_.count(c.equip[0])) ? items_[c.equip[0]].atk : 0;
+        int armorDef = 0;
+        for (int k = 0; k < 6; ++k) if (c.equip[k] > 0 && items_.count(c.equip[k])) armorDef += items_[c.equip[k]].def;
+        Combatant cb;
+        cb.name = c.name;
+        cb.hp = cb.maxhp = (c.hp > 0 ? c.hp : 28 + c.level * 2 + c.vit * 4);  // real max-HP (growth table)
+        cb.atk = std::max(1, c.str);                        // A = real STR (attack stat)
+        cb.wpn = std::max(3, weaponAtk);                    // W = equipped weapon ATK
+        cb.def = std::max(1, c.vit + armorDef + c.level / 2);
+        cb.level = c.level; cb.spd = std::max(1, c.spd);
+        cb.mp = cb.maxmp = c.mp; cb.intl = c.intl; cb.mnd = c.mnd;
+        party_.push_back(cb);
     }
-    if (party_.empty()) party_.push_back({ "Hero", 34, 34, 13, 6, false, 8, 0 });
+    if (party_.empty()) { Combatant cb; cb.name = "Hero"; cb.hp = cb.maxhp = 34; cb.atk = 13; cb.wpn = 6; cb.def = 6; party_.push_back(cb); }
     target_ = firstLivingEnemy(0); enemyActor_ = 0;
     for (auto& c : party_)   c.atb = std::rand() % 256;     // stagger initial ATB gauges
     for (auto& e : enemies_) e.atb = std::rand() % 256;
@@ -721,13 +746,6 @@ void Host::startBattle(int leadId) {
 }
 
 void Host::updateBattle(const InputState& in) {
-    // physical damage = decoded core of BattleClass::CalcPhysicAttackDmg: an attack-power
-    // term + random spread (engine Rand), minus full defense (not def/2).  Exact constants +
-    // crit/element/race/status/hit-count modifiers need the full BTLACT struct map (M6 cont.).
-    auto dmg = [](int atk, int def) {
-        int raw = atk * 2 + (std::rand() % (std::max(1, atk) + 1));   // power + spread
-        return std::max(1, raw / 2 - def);                            // defense subtracts
-    };
     auto prevLivingEnemy = [&](int from) {
         for (int i = from - 1; i >= 0; --i) if (enemies_[i].hp > 0) return i;
         for (int i = (int)enemies_.size() - 1; i >= 0; --i) if (enemies_[i].hp > 0) return i;
@@ -742,9 +760,9 @@ void Host::updateBattle(const InputState& in) {
                 target_ = firstLivingEnemy(0);
                 int living = 0; for (const auto& e : enemies_) if (e.hp > 0) living++;
                 if (living <= 1) {
-                    Combatant& a = party_[btlMember_]; int d = dmg(a.atk, enemies_[target_].def);
+                    int d = physDamage(party_[btlMember_], enemies_[target_]);
                     enemies_[target_].hp = std::max(0, enemies_[target_].hp - d);
-                    btlMsg_ = a.name + " -> " + enemies_[target_].name + "   " + std::to_string(d) + " dmg";
+                    btlMsg_ = party_[btlMember_].name + " -> " + enemies_[target_].name + "   " + std::to_string(d) + " dmg";
                     btlPhase_ = 1;
                 } else btlPhase_ = 5;
             } else if (btlCmd_ == 1) {                       // Magic
@@ -782,9 +800,9 @@ void Host::updateBattle(const InputState& in) {
         if (in.pressed & BTN_CONFIRM) {
             if (pendingSpell_ >= 0) { castOn(1, target_); }
             else {
-                Combatant& a = party_[btlMember_]; int d = dmg(a.atk, enemies_[target_].def);
+                int d = physDamage(party_[btlMember_], enemies_[target_]);
                 enemies_[target_].hp = std::max(0, enemies_[target_].hp - d);
-                btlMsg_ = a.name + " -> " + enemies_[target_].name + "   " + std::to_string(d) + " dmg";
+                btlMsg_ = party_[btlMember_].name + " -> " + enemies_[target_].name + "   " + std::to_string(d) + " dmg";
                 btlPhase_ = 1;
             }
         }
