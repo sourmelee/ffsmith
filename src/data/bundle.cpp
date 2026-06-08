@@ -284,4 +284,20 @@ std::unordered_map<int, std::unordered_map<int, ChipAnim>> load_chipanim(const s
     return out;
 }
 
+std::unordered_map<int, std::unordered_map<int, int>> load_chipfloor(const std::string& path) {
+    std::unordered_map<int, std::unordered_map<int, int>> out;
+    auto buf = read_file(path);
+    if (buf.size() < 8 || std::memcmp(buf.data(), "FCFL", 4) != 0) return out;
+    uint32_t nt = rd_u32(&buf[4]); size_t o = 8;
+    for (uint32_t t = 0; t < nt && o + 4 <= buf.size(); ++t) {
+        int mc = rd_u16(&buf[o]); int cnt = rd_u16(&buf[o + 2]); o += 4;
+        auto& m = out[mc];
+        for (int i = 0; i < cnt && o + 3 <= buf.size(); ++i) {
+            int inner = rd_u16(&buf[o]); int fl = buf[o + 2]; o += 3;
+            m[inner] = fl;
+        }
+    }
+    return out;
+}
+
 }  // namespace ffsmith

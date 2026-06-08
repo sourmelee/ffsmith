@@ -15,4 +15,9 @@ namespace ffsmith {
 // Texture on failure.
 Texture compose_map(const std::string& bundle_dir, const FfMap& map);
 
+// Compose only layers [lo, hi) of the map. `opaque` fills an opaque-black
+// background (ground); otherwise the background is transparent (overhead
+// layers drawn above sprites). Layer 0 = ground, layers 1+ = overhead.
+Texture compose_range(const std::string& bundle_dir, const FfMap& map, int lo, int hi, bool opaque);
+
 }  // namespace ffsmith

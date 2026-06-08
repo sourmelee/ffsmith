@@ -60,10 +60,50 @@ void Host::setMap(const Texture& fb) {
     SDL_RenderSetLogicalSize(renderer_, fb.w, fb.h);
 }
 
+void Host::selfTestDamage() {
+    if (!field_) { std::printf("[dmgtest] no field\n"); return; }
+    if (gameParty_.empty()) newGame();
+    if (animDirty_) { buildAnimCells(); animDirty_ = false; }
+    const FfMap* mp = field_->map();
+    std::printf("[dmgtest] damage cells on map: %zu\n", damageCells_.size());
+    if (damageCells_.empty() || !mp) return;
+    static const int DXn[4] = {0,0,-1,1}, DYn[4] = {1,-1,0,0};
+    int dc = -1, wn = -1, dir = -1;
+    for (int c : damageCells_) {
+        int cx = c % mp->w, cy = c / mp->w;
+        for (int d = 0; d < 4; ++d) {
+            int nx = cx + DXn[d], ny = cy + DYn[d];
+            if (nx < 0 || ny < 0 || nx >= mp->w || ny >= mp->h) continue;
+            int nc = ny * mp->w + nx;
+            bool solid = !mp->pass.empty() && (mp->pass[nc] & 0x0f) == 0;
+            if (solid || damageCells_.count(nc)) continue;
+            wn = nc; dc = c;
+            int odx = cx - nx, ody = cy - ny;
+            dir = (ody > 0) ? 0 : (ody < 0) ? 1 : (odx < 0) ? 2 : 3;
+            break;
+        }
+        if (dc >= 0) break;
+    }
+    if (dc < 0) { std::printf("[dmgtest] no reachable damage cell\n"); return; }
+    field_->setPos(wn % mp->w, wn / mp->w); lastCell_ = -1; mode_ = Mode::Field; menuOpen_ = false;
+    auto hpline = [&](const char* w){ std::printf("[dmgtest] %-6s HP:", w); for (auto& gm : gameParty_) std::printf(" %d", gm.hp); std::printf("\n"); };
+    std::printf("[dmgtest] step from cell %d onto damage cell %d (dir %d)\n", wn, dc, dir);
+    hpline("before");
+    static const uint32_t BTN[4] = { BTN_DOWN, BTN_UP, BTN_LEFT, BTN_RIGHT };
+    input_ = InputState{}; input_.held = BTN[dir];
+    for (int g = 0; g < 300; ++g) {
+        update(0.0);
+        if (field_->col() == dc % mp->w && field_->row() == dc / mp->w && !field_->moving()) break;
+    }
+    hpline("after");
+}
+
 void Host::loadChipAnim(const std::string& dir) {
     chipAnim_ = load_chipanim(dir + "/data/chipanim.bin");
+    chipFloor_ = load_chipfloor(dir + "/data/chipfloor.bin");
     size_t total = 0; for (auto& kv : chipAnim_) total += kv.second.size();
-    std::printf("[FFSmith] chip anim: %zu tilesets, %zu animated chips\n", chipAnim_.size(), total);
+    size_t fl = 0; for (auto& kv : chipFloor_) fl += kv.second.size();
+    std::printf("[FFSmith] chip anim: %zu tilesets / %zu chips; floor-attr chips: %zu\n", chipAnim_.size(), total, fl);
 }
 
 SDL_Texture* Host::slotSheet(int mc, int var, int& w, int& h) {
@@ -85,8 +125,8 @@ SDL_Texture* Host::slotSheet(int mc, int var, int& w, int& h) {
 }
 
 void Host::buildAnimCells() {
-    animCells_.clear();
-    if (!field_ || chipAnim_.empty()) return;
+    animCells_.clear(); damageCells_.clear(); lastCell_ = -1;
+    if (!field_) return;
     const FfMap* mp = field_->map(); if (!mp) return;
     int ncells = mp->w * mp->h;
     for (int i = 0; i < ncells; ++i) {
@@ -97,11 +137,14 @@ void Host::buildAnimCells() {
         int mc  = (high == 1 && mp->mc_slot1 >= 0) ? mp->mc_slot1 : mp->mc_slot0;
         int var = (high == 1 && mp->mc_slot1 >= 0) ? mp->var_slot1 : mp->var_slot0;
         int inner = word & 0xff;
+        auto fit = chipFloor_.find(mc);                          // damage floor (only if walkable)?
+        bool walkable = mp->pass.empty() || (i < (int)mp->pass.size() && (mp->pass[i] & 0x0f) != 0);
+        if (walkable && fit != chipFloor_.end()) { auto fc = fit->second.find(inner); if (fc != fit->second.end() && (fc->second & 0x10)) damageCells_.insert(i); }
         auto mit = chipAnim_.find(mc); if (mit == chipAnim_.end()) continue;
         auto cit = mit->second.find(inner); if (cit == mit->second.end()) continue;
         animCells_.push_back({ i, mc, var, inner, cit->second.type, cit->second.frames, cit->second.speed });
     }
-    std::printf("[FFSmith] animated cells on map: %zu\n", animCells_.size());
+    std::printf("[FFSmith] field cells: %zu animated, %zu damage\n", animCells_.size(), damageCells_.size());
 }
 
 static int animFrameOf(int timer, int type, int frames, int speed) {
@@ -110,6 +153,30 @@ static int animFrameOf(int timer, int type, int frames, int speed) {
     int phase = timer / div;
     if (type == 1) { int period = (frames - 1) * 2; int t = ((phase % period) + period) % period; return t < frames ? t : period - t; }
     return ((phase % frames) + frames) % frames;
+}
+
+void Host::checkFieldHazard() {
+    if (!field_ || damageCells_.empty()) return;
+    const FfMap* mp = field_->map(); if (!mp) return;
+    int cell = field_->row() * mp->w + field_->col();
+    if (cell == lastCell_) return;                           // only on arrival at a new cell
+    lastCell_ = cell;
+    if (!damageCells_.count(cell)) return;
+    int hit = 0;
+    for (auto& gm : gameParty_) {
+        if (gm.hp <= 0) continue;
+        int mh = (gm.charIdx >= 0 && gm.charIdx < (int)chars_.size() && chars_[gm.charIdx].hp > 0) ? chars_[gm.charIdx].hp : 30;
+        gm.hp = std::max(0, gm.hp - std::max(1, mh / 16));   // ~1/16 maxHP per step (exact amount not decoded)
+        ++hit;
+    }
+    if (hit) std::printf("[FFSmith] damage floor @cell %d: %d members hurt\n", cell, hit);
+}
+
+void Host::setOverhead(const Texture& img) {
+    if (overhead_tex_) { SDL_DestroyTexture(overhead_tex_); overhead_tex_ = nullptr; }
+    if (!renderer_ || !img.valid()) return;       // no overhead layer -> nothing above sprites
+    overhead_tex_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, img.w, img.h);
+    if (overhead_tex_) { SDL_UpdateTexture(overhead_tex_, nullptr, img.rgba.data(), img.w * 4); SDL_SetTextureBlendMode(overhead_tex_, SDL_BLENDMODE_BLEND); }
 }
 
 void Host::setField(Field* f, const Texture& mapImg) {
@@ -282,7 +349,7 @@ void Host::update(double /*dt*/) {
         updateMenu(input_);
     } else if (field_) {
         if (input_.pressed & BTN_MENU) { menuOpen_ = true; menuCursor_ = 0; }
-        else field_->update(input_);
+        else { field_->update(input_); checkFieldHazard(); }
     }
     ++tick_count_;
     if (cfg_.max_frames >= 0 && static_cast<int>(tick_count_) >= cfg_.max_frames) running_ = false;
@@ -366,7 +433,7 @@ void Host::render() {
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
 
         // Animated tiles: overdraw the current frame of each animated cell (under sprites).
-        if (animDirty_ && !chipAnim_.empty()) { buildAnimCells(); animDirty_ = false; }
+        if (animDirty_) { buildAnimCells(); animDirty_ = false; }
         if (!animCells_.empty()) {
             const FfMap* mp = field_->map();
             for (const auto& a : animCells_) {
@@ -413,6 +480,9 @@ void Host::render() {
             }
             SDL_RenderFillRect(renderer_, &fr);
         }
+
+        // Overhead layers (1+): drawn ABOVE the player so it passes behind canopies/roofs.
+        if (overhead_tex_) SDL_RenderCopy(renderer_, overhead_tex_, &src, &dst);
 
         if (overlayOn_) {
             const FfMap* mp = field_->map();

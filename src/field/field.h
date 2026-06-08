@@ -18,6 +18,7 @@ public:
 
     int  col() const { return col_; }
     int  row() const { return row_; }
+    void setPos(int c, int r) { col_ = c; row_ = r; moving_ = false; prog_ = 0; }
     int  facing() const { return facing_; }
     bool moving() const { return moving_; }
     int  tile() const { return tile_; }

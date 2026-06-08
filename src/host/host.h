@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include "host/input.h"
 #include "data/bundle.h"
@@ -42,8 +43,11 @@ public:
     bool frame();   // one loop iteration; false when quit (lets caller swap maps on warp)
     void setMap(const Texture& fb);
     void setField(Field* f, const Texture& mapImg);
+    void setOverhead(const Texture& img);   // layers 1+ drawn above sprites (z-order)
     void loadChipAnim(const std::string& bundleDir);
+    void checkFieldHazard();   // damage floors -> persistent party HP
     void setAnimTick(int t) { animTimer_ = t; }
+    void selfTestDamage();   // headless: walk onto a damage floor, report party HP
     void setBundleDir(const std::string& d) { bundleDir_ = d; }
     void setPlayerSprite(int img, int var) { playerImg_ = img; playerVar_ = var; }
     void setMode(Mode m) { mode_ = m; }
@@ -128,6 +132,10 @@ private:
     std::unordered_map<int, SDL_Texture*> sprites_;   // key = img*100+var
     std::unordered_map<int, SDL_Texture*> sheets_;    // tilesheets for anim overdraw (mc*100+var)
     std::unordered_map<int, std::unordered_map<int, ChipAnim>> chipAnim_;   // mc -> inner -> anim
+    std::unordered_map<int, std::unordered_map<int, int>> chipFloor_;       // mc -> inner -> floorAttr
+    std::unordered_set<int> damageCells_;   // cell indices that hurt the party
+    int lastCell_ = -1;
+    SDL_Texture* overhead_tex_ = nullptr;
     struct AnimCell { int idx, mc, var, baseInner, type, frames, speed; };
     std::vector<AnimCell> animCells_;
     bool animDirty_ = true;

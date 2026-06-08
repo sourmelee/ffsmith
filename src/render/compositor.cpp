@@ -36,8 +36,14 @@ static Texture* load_slot(const std::string& bundle_dir,
 }
 
 Texture compose_map(const std::string& bundle_dir, const FfMap& map) {
+    return compose_range(bundle_dir, map, 0, (int)map.layers.size(), true);
+}
+
+Texture compose_range(const std::string& bundle_dir, const FfMap& map, int lo, int hi, bool opaque) {
     Texture out;
     if (!map.valid()) return out;
+    if (lo < 0) lo = 0;
+    if (hi > (int)map.layers.size()) hi = (int)map.layers.size();
 
     std::unordered_map<int, Texture> cache;
     Texture* s0 = load_slot(bundle_dir, cache, map.mc_slot0, map.var_slot0);
@@ -64,9 +70,10 @@ Texture compose_map(const std::string& bundle_dir, const FfMap& map) {
     const int W = map.w * TS, H = map.h * TS;
     out.w = W; out.h = H;
     out.rgba.assign((size_t)W * H * 4, 0);
-    for (size_t i = 0; i < (size_t)W * H; ++i) out.rgba[i * 4 + 3] = 255;  // opaque black
+    if (opaque) for (size_t i = 0; i < (size_t)W * H; ++i) out.rgba[i * 4 + 3] = 255;  // opaque black
 
-    for (const auto& layer : map.layers) {
+    for (int li = lo; li < hi; ++li) {
+        const auto& layer = map.layers[li];
         const int ncell = (int)layer.size();
         for (int i = 0; i < ncell; ++i) {
             const uint16_t word = layer[i];
@@ -93,11 +100,19 @@ Texture compose_map(const std::string& bundle_dir, const FfMap& map) {
                         d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = 255;
                     } else if (sa == 0) {       // transparent src: keep dst
                         // no-op
-                    } else {                    // dst is opaque -> straight over
+                    } else if (d[3] == 255) {   // dst opaque -> straight over
                         d[0] = (uint8_t)div255(s[0] * sa + d[0] * (255 - sa));
                         d[1] = (uint8_t)div255(s[1] * sa + d[1] * (255 - sa));
                         d[2] = (uint8_t)div255(s[2] * sa + d[2] * (255 - sa));
                         d[3] = 255;
+                    } else {                    // dst transparent/partial -> alpha-composite
+                        int da = d[3], oa = sa + div255(da * (255 - sa));
+                        if (oa > 0) {
+                            d[0] = (uint8_t)((s[0] * sa + div255(d[0] * da * (255 - sa))) / oa);
+                            d[1] = (uint8_t)((s[1] * sa + div255(d[1] * da * (255 - sa))) / oa);
+                            d[2] = (uint8_t)((s[2] * sa + div255(d[2] * da * (255 - sa))) / oa);
+                        }
+                        d[3] = (uint8_t)oa;
                     }
                 }
             }

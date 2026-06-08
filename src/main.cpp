@@ -143,7 +143,7 @@ int main(int argc, char** argv) {
     bool debugMode = false, dbgNoclip = false, dbgOverlay = false, dbgHud = false;
     int menuPageFlag = 0, battleMon = -1, battleSim = -1;
     bool spellTest = false, saveFlag = false, loadFlag = false, itemTest = false, equipTest = false;
-    int animTick = 0;
+    int animTick = 0; bool dmgTest = false, noOverhead = false;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
         if      (!std::strcmp(a, "--bundle")) bundle = takeStr(argc, argv, i, "");
@@ -165,6 +165,8 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--itemtest")) itemTest = true;
         else if (!std::strcmp(a, "--animtick")) animTick = takeInt(argc, argv, i, 0);
         else if (!std::strcmp(a, "--equiptest")) equipTest = true;
+        else if (!std::strcmp(a, "--dmgtest")) dmgTest = true;
+        else if (!std::strcmp(a, "--no-overhead")) noOverhead = true;
         else if (!std::strcmp(a, "--save")) saveFlag = true;
         else if (!std::strcmp(a, "--load")) loadFlag = true;
         else if (!std::strcmp(a, "--debug")) debugMode = true;
@@ -200,7 +202,8 @@ int main(int argc, char** argv) {
     }
     FfMap m = load_ffmap(bundle + "/maps/" + map + ".ffmap");
     if (!m.valid()) { std::fprintf(stderr, "[FFSmith] failed to load %s/maps/%s.ffmap\n", bundle.c_str(), map.c_str()); return 1; }
-    Texture fb = compose_map(bundle, m);
+    Texture fb = compose_range(bundle, m, 0, 1, true);                    // ground = layer 0
+    Texture overheadFb = compose_range(bundle, m, 1, m.n_layers, false);  // overhead = layers 1+
     if (!fb.valid()) { std::fprintf(stderr, "[FFSmith] compose failed for %s\n", map.c_str()); return 1; }
     int tile = (m.w > 0) ? fb.w / m.w : 32;
     std::printf("[FFSmith] %s: %dx%d cells, %d layers, %zu events, tile=%d -> %dx%d px\n",
@@ -223,14 +226,14 @@ int main(int argc, char** argv) {
     auto loadInto = [&](const std::string& key, int sc, int sr, Host* host) -> bool {
         FfMap nm = load_ffmap(bundle + "/maps/" + key + ".ffmap");
         if (!nm.valid()) return false;
-        Texture nfb = compose_map(bundle, nm);
+        Texture nfb = compose_range(bundle, nm, 0, 1, true);
         if (!nfb.valid()) return false;
         m = std::move(nm); fb = std::move(nfb);
         int t = (m.w > 0) ? fb.w / m.w : 32;
         if (sc < 0) sc = m.w / 2; else if (sc >= m.w) sc = m.w - 1;
         if (sr < 0) sr = m.h / 2; else if (sr >= m.h) sr = m.h - 1;
         field = std::make_unique<Field>(&m, t, sc, sr);
-        if (host) { host->setField(field.get(), fb); host->loadText(bundle, bankOf(key)); }
+        if (host) { host->setField(field.get(), fb); host->setOverhead(compose_range(bundle, m, 1, m.n_layers, false)); host->loadText(bundle, bankOf(key)); }
         curMap = key;
         return true;
     };
@@ -269,6 +272,7 @@ int main(int argc, char** argv) {
     host.setPlayerSprite(playerImg, playerVar);
     host.loadText(bundle, bankOf(map));
     host.setField(field.get(), fb);
+    if (!noOverhead) host.setOverhead(overheadFb);
     host.setDebugData(mapList, spriteList);
     host.loadMenuData(bundle);
     if (loadFlag && bootSave.hasState) {
@@ -277,6 +281,7 @@ int main(int argc, char** argv) {
     }
     if (itemTest) { host.selfTestItemUse(); return 0; }
     if (equipTest) { host.selfTestEquip(); return 0; }
+    if (dmgTest) { host.selfTestDamage(); return 0; }
     if (saveFlag) { writeSave(bundle, map, startCol, startRow, face < 0 ? 0 : face, playerImg, host); return 0; }
     host.debugSelectMap(map);
     host.setMapKey(map);
