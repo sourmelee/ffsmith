@@ -85,7 +85,7 @@ static bool writeSave(const std::string& bundle, const std::string& mk, int x, i
     FILE* f = std::fopen((bundle + "/save.dat").c_str(), "wb");
     if (!f) return false;
     std::fwrite("FSAV", 1, 4, f);
-    uint8_t ver = 2; std::fwrite(&ver, 1, 1, f);
+    uint8_t ver = 3; std::fwrite(&ver, 1, 1, f);
     uint16_t mlen = (uint16_t)mk.size(); std::fwrite(&mlen, 2, 1, f); std::fwrite(mk.data(), 1, mk.size(), f);
     uint16_t ux = (uint16_t)x, uy = (uint16_t)y; std::fwrite(&ux, 2, 1, f); std::fwrite(&uy, 2, 1, f);
     uint8_t uf = (uint8_t)facing; std::fwrite(&uf, 1, 1, f);
@@ -93,7 +93,8 @@ static bool writeSave(const std::string& bundle, const std::string& mk, int x, i
     // v2: persistent party (current HP/MP), inventory, gil
     const auto& party = host.gameParty();
     uint8_t pc = (uint8_t)party.size(); std::fwrite(&pc, 1, 1, f);
-    for (const auto& gm : party) { int32_t v[3] = { gm.charIdx, gm.hp, gm.mp }; std::fwrite(v, 4, 3, f); }
+    for (const auto& gm : party) { int32_t v[3] = { gm.charIdx, gm.hp, gm.mp }; std::fwrite(v, 4, 3, f);
+                                   int32_t e[6]; for (int k = 0; k < 6; ++k) e[k] = gm.equip[k]; std::fwrite(e, 4, 6, f); }
     const auto& inv = host.inventory();
     uint16_t ic = (uint16_t)inv.size(); std::fwrite(&ic, 2, 1, f);
     for (const auto& sl : inv) { int32_t v[2] = { sl.id, sl.count }; std::fwrite(v, 4, 2, f); }
@@ -119,7 +120,9 @@ static SaveData readSave(const std::string& bundle) {
     sd.x = ux; sd.y = uy; sd.facing = uf; sd.img = im; sd.ok = true;
     if (ver >= 2) {
         uint8_t pc = 0; std::fread(&pc, 1, 1, f);
-        for (int i = 0; i < pc; ++i) { int32_t v[3] = {0,0,0}; std::fread(v, 4, 3, f); GameMember gm; gm.charIdx = v[0]; gm.hp = v[1]; gm.mp = v[2]; sd.party.push_back(gm); }
+        for (int i = 0; i < pc; ++i) { int32_t v[3] = {0,0,0}; std::fread(v, 4, 3, f); GameMember gm; gm.charIdx = v[0]; gm.hp = v[1]; gm.mp = v[2];
+                                       if (ver >= 3) { int32_t e[6] = {0,0,0,0,0,0}; std::fread(e, 4, 6, f); for (int k = 0; k < 6; ++k) gm.equip[k] = e[k]; }
+                                       sd.party.push_back(gm); }
         uint16_t ic = 0; std::fread(&ic, 2, 1, f);
         for (int i = 0; i < ic; ++i) { int32_t v[2] = {0,0}; std::fread(v, 4, 2, f); InvSlot sl; sl.id = v[0]; sl.count = v[1]; sd.inv.push_back(sl); }
         int32_t gil = 0; std::fread(&gil, 4, 1, f); sd.gil = gil; sd.hasState = true;
@@ -139,7 +142,7 @@ int main(int argc, char** argv) {
     bool startTitle = false, openMenuFlag = false;
     bool debugMode = false, dbgNoclip = false, dbgOverlay = false, dbgHud = false;
     int menuPageFlag = 0, battleMon = -1, battleSim = -1;
-    bool spellTest = false, saveFlag = false, loadFlag = false, itemTest = false;
+    bool spellTest = false, saveFlag = false, loadFlag = false, itemTest = false, equipTest = false;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
         if      (!std::strcmp(a, "--bundle")) bundle = takeStr(argc, argv, i, "");
@@ -159,6 +162,7 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--battlesim")) battleSim = takeInt(argc, argv, i, 1);
         else if (!std::strcmp(a, "--spelltest")) spellTest = true;
         else if (!std::strcmp(a, "--itemtest")) itemTest = true;
+        else if (!std::strcmp(a, "--equiptest")) equipTest = true;
         else if (!std::strcmp(a, "--save")) saveFlag = true;
         else if (!std::strcmp(a, "--load")) loadFlag = true;
         else if (!std::strcmp(a, "--debug")) debugMode = true;
@@ -270,6 +274,7 @@ int main(int argc, char** argv) {
         std::printf("[FFSmith] restored party(%zu) inv(%zu) gil=%d\n", bootSave.party.size(), bootSave.inv.size(), bootSave.gil);
     }
     if (itemTest) { host.selfTestItemUse(); return 0; }
+    if (equipTest) { host.selfTestEquip(); return 0; }
     if (saveFlag) { writeSave(bundle, map, startCol, startRow, face < 0 ? 0 : face, playerImg, host); return 0; }
     host.debugSelectMap(map);
     host.setMapKey(map);

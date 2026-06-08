@@ -242,7 +242,7 @@ void Host::updateMenu(const InputState& in) {
         if (in.pressed & BTN_CONFIRM) {
             switch (menuCursor_) {
                 case 0: menuPage_ = 1; pageCursor_ = 0; pageScroll_ = 0; menuMsg_.clear(); break;  // Item
-                case 1: menuPage_ = 2; pageChar_ = 0; break;                      // Equip
+                case 1: menuPage_ = 2; pageChar_ = 0; equipSlot_ = 0; equipSub_ = 0; menuMsg_.clear(); break;  // Equip
                 case 2: menuPage_ = 3; pageChar_ = 0; break;                      // Status
                 case 3: saveReq_ = true; menuOpen_ = false; break;                // Save
                 case 4: running_ = false; break;                                  // Quit
@@ -257,13 +257,29 @@ void Host::updateMenu(const InputState& in) {
             if (in.pressed & BTN_CONFIRM) useItem(pageCursor_);
         }
         if (in.pressed & (BTN_CANCEL | BTN_MENU)) { menuPage_ = 0; menuMsg_.clear(); }
-    } else {                                                // Equip / Status: cycle party member
+    } else if (menuPage_ == 3) {                            // Status: cycle party member
         int n = (int)gameParty_.size();
         if (n > 0) {
             if (in.pressed & (BTN_DOWN | BTN_RIGHT)) pageChar_ = (pageChar_ + 1) % n;
             if (in.pressed & (BTN_UP | BTN_LEFT))    pageChar_ = (pageChar_ + n - 1) % n;
         }
         if (in.pressed & (BTN_CANCEL | BTN_MENU)) menuPage_ = 0;
+    } else {                                                // Equip: slot cursor + candidate list + swap
+        int n = (int)gameParty_.size();
+        if (equipSub_ == 0) {
+            if (in.pressed & BTN_DOWN) { equipSlot_ = (equipSlot_ + 1) % 6; menuMsg_.clear(); }
+            if (in.pressed & BTN_UP)   { equipSlot_ = (equipSlot_ + 5) % 6; menuMsg_.clear(); }
+            if (n > 0 && (in.pressed & BTN_RIGHT)) { pageChar_ = (pageChar_ + 1) % n; equipSlot_ = 0; menuMsg_.clear(); }
+            if (n > 0 && (in.pressed & BTN_LEFT))  { pageChar_ = (pageChar_ + n - 1) % n; equipSlot_ = 0; menuMsg_.clear(); }
+            if (in.pressed & BTN_CONFIRM) { buildEquipCandidates(equipSlot_); equipSub_ = 1; equipPick_ = 0; menuMsg_.clear(); }
+            if (in.pressed & (BTN_CANCEL | BTN_MENU)) menuPage_ = 0;
+        } else {
+            int rows = (int)equipCand_.size() + 1;          // + [Remove]
+            if (in.pressed & BTN_DOWN) equipPick_ = (equipPick_ + 1) % rows;
+            if (in.pressed & BTN_UP)   equipPick_ = (equipPick_ + rows - 1) % rows;
+            if (in.pressed & BTN_CONFIRM) { swapEquip(equipSlot_, equipPick_); equipSub_ = 0; }
+            if (in.pressed & BTN_CANCEL) { equipSub_ = 0; menuMsg_.clear(); }
+        }
     }
 }
 
@@ -491,16 +507,42 @@ void Host::renderCharPage(int px, int py, int pw, int ph, bool status) {
                  + "   MP " + std::to_string(gm.mp) + "/" + std::to_string(memberMaxMp(pc)), maxChars, 235, 235, 255);
         drawText(px + 10, py + 42 + fch_ * 2, "STR " + std::to_string(c.str) + "      SPD " + std::to_string(c.spd), maxChars, 230, 235, 255);
         drawText(px + 10, py + 42 + fch_ * 3, "VIT " + std::to_string(c.vit) + "   INT " + std::to_string(c.intl) + "   MND " + std::to_string(c.mnd), maxChars, 230, 235, 255);
-        int w0 = c.equip[0];
+        int w0 = gm.equip[0];
         std::string wpn = (w0 > 0 && items_.count(w0)) ? items_[w0].name : std::string("-");
         drawText(px + 10, py + 42 + fch_ * 5, "Weapon: " + wpn, maxChars, 200, 220, 255);
     } else {
+        static const char* SLOT[6] = { "Weapon", "Off-hand", "Head", "Body", "Arms", "Acc." };
+        int top = py + 40;
         for (int k = 0; k < 6; ++k) {
-            int ty = py + 42 + k * (fch_ + 2);
-            int id = c.equip[k];
+            int ty = top + k * (fch_ + 2);
+            int id = gm.equip[k];
             std::string nm = (id > 0 && items_.count(id)) ? items_[id].name
-                           : (id ? ("#" + std::to_string(id)) : std::string("(empty)"));
-            drawText(px + 10, ty, "Slot " + std::to_string(k + 1) + ":  " + nm, maxChars, 230, 230, 255);
+                           : (id ? ("#" + std::to_string(id)) : std::string("-"));
+            bool sel = (equipSub_ == 0 && k == equipSlot_);
+            if (sel) drawText(px + 4, ty, ">", 2, 255, 240, 120);
+            drawText(px + 12, ty, std::string(SLOT[k]) + ": " + nm, maxChars, sel ? 255 : 225, 230, sel ? 170 : 255);
+        }
+        int fy = top + 6 * (fch_ + 2) + 2;
+        if (equipSub_ == 1) {
+            SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 200);
+            SDL_Rect cb{ px + 3, fy, pw - 6, ph - (fy - py) - 4 }; SDL_RenderFillRect(renderer_, &cb);
+            drawText(px + 8, fy + 2, std::string("Fit ") + SLOT[equipSlot_] + ":", maxChars, 255, 235, 150);
+            int rows = (int)equipCand_.size() + 1;
+            for (int r = 0; r < rows; ++r) {
+                int ty = fy + 2 + (r + 1) * (fch_ + 1);
+                if (ty > py + ph - fch_) break;
+                bool sel = (r == equipPick_);
+                std::string label;
+                if (r == 0) label = "[Remove]";
+                else { int id = inventory_[equipCand_[r - 1]].id; const Item& it = items_[id];
+                       label = it.name + (it.atk ? "  A+" + std::to_string(it.atk) : std::string())
+                                       + (it.def ? "  D+" + std::to_string(it.def) : std::string()); }
+                if (sel) drawText(px + 8, ty, ">", 2, 255, 240, 120);
+                drawText(px + 18, ty, label, maxChars - 2, sel ? 255 : 215, 235, sel ? 170 : 255);
+            }
+        } else {
+            if (!menuMsg_.empty()) drawText(px + 8, fy, menuMsg_, maxChars, 180, 230, 180);
+            drawText(px + 8, fy + fch_ + 1, "U/D slot  L/R member  A:change", maxChars, 160, 185, 150);
         }
     }
 }
@@ -712,8 +754,12 @@ int Host::memberMaxMp(int i) const {
 void Host::newGame() {
     gameParty_.clear();
     int n = std::min((int)chars_.size(), 4);
-    for (int i = 0; i < n; ++i) { GameMember m; m.charIdx = i; m.hp = chars_[i].hp > 0 ? chars_[i].hp : 30; m.mp = chars_[i].mp; gameParty_.push_back(m); }
-    inventory_ = { {420, 5} };     // 5 Potions (item 420)
+    for (int i = 0; i < n; ++i) {
+        GameMember m; m.charIdx = i; m.hp = chars_[i].hp > 0 ? chars_[i].hp : 30; m.mp = chars_[i].mp;
+        for (int k = 0; k < 6; ++k) m.equip[k] = chars_[i].equip[k];   // starting gear from chara_set
+        gameParty_.push_back(m);
+    }
+    inventory_ = { {420, 5}, {21, 1}, {22, 1}, {295, 1}, {237, 1}, {215, 1}, {408, 1} };  // Potions + spare gear (Broadsword/Iron Sword/Leather Armor/Iron Helm/Leather Shield/Power Wrist)
     gil_ = 500;
 }
 
@@ -723,6 +769,29 @@ void Host::endBattle() {                                    // persist battle HP
         gameParty_[i].mp = std::max(0, party_[i].mp);
     }
     mode_ = Mode::Field;
+}
+
+void Host::selfTestEquip() {
+    if (gameParty_.empty()) newGame();
+    pageChar_ = 0;                                   // Sol
+    GameMember& gm = gameParty_[0];
+    static const char* SLOT[6] = { "Weapon", "Off-hand", "Head", "Body", "Arms", "Acc." };
+    for (int sl = 0; sl < 6; ++sl) {
+        buildEquipCandidates(sl);
+        std::printf("[equiptest] slot%d %-8s fits:", sl, SLOT[sl]);
+        if (equipCand_.empty()) std::printf(" (none)");
+        for (int ci : equipCand_) { int id = inventory_[ci].id; std::printf(" %s(t%d)", items_[id].name.c_str(), items_[id].type); }
+        std::printf("\n");
+    }
+    auto atkOf = [&](int id) { return (id > 0 && items_.count(id)) ? items_[id].atk : 0; };
+    buildEquipCandidates(0);
+    if (!equipCand_.empty()) {
+        int wasId = gm.equip[0];
+        swapEquip(0, 1);
+        std::printf("[equiptest] slot0 swap: %s(A%d) -> %s(A%d)   msg=\"%s\"\n",
+                    items_.count(wasId) ? items_[wasId].name.c_str() : "-", atkOf(wasId),
+                    items_[gm.equip[0]].name.c_str(), atkOf(gm.equip[0]), menuMsg_.c_str());
+    }
 }
 
 void Host::selfTestItemUse() {
@@ -739,13 +808,65 @@ void Host::selfTestItemUse() {
                 chars_[gameParty_[m].charIdx].name.c_str(), gameParty_[m].hp, memberMaxHp(m), after, menuMsg_.c_str());
 }
 
+int Host::curMember() const { return gameParty_.empty() ? 0 : (pageChar_ % (int)gameParty_.size()); }
+
+bool Host::slotAcceptsItem(int slot, const Item& it) const {
+    // item_type category (baked 0.7.13+): 1-15 weapon, 16 shield, 17-19 head,
+    // 20-22 body, 23 hands/accessory; 0 = consumable/key (never equippable).
+    int t = it.type;
+    bool weapon = (t >= 1 && t <= 15), shield = (t == 16);
+    bool head = (t >= 17 && t <= 19), body = (t >= 20 && t <= 22), handAcc = (t == 23);
+    switch (slot) {
+        case 0: return weapon;                 // Weapon
+        case 1: return weapon || shield;       // Off-hand: weapon (dual-wield) or shield
+        case 2: return head;                   // Head
+        case 3: return body;                   // Body
+        case 4: return handAcc;                // Arms
+        case 5: return handAcc;                // Accessory (shares category 23)
+        default: return false;
+    }
+}
+
+void Host::addInventory(int id, int count) {
+    for (auto& sl : inventory_) if (sl.id == id) { sl.count += count; return; }
+    inventory_.push_back({ id, count });
+}
+
+void Host::buildEquipCandidates(int slot) {
+    equipCand_.clear();
+    for (int i = 0; i < (int)inventory_.size(); ++i) {
+        auto it = items_.find(inventory_[i].id);
+        if (it != items_.end() && slotAcceptsItem(slot, it->second)) equipCand_.push_back(i);
+    }
+}
+
+void Host::swapEquip(int slot, int pick) {           // pick 0 = Remove; 1.. = equipCand_[pick-1]
+    if (gameParty_.empty() || slot < 0 || slot > 5) return;
+    GameMember& gm = gameParty_[curMember()];
+    int oldId = gm.equip[slot];
+    if (pick == 0) {                                 // unequip
+        if (oldId > 0) { addInventory(oldId); gm.equip[slot] = 0; menuMsg_ = "Unequipped"; }
+        else menuMsg_ = "(empty)";
+        return;
+    }
+    int ci = pick - 1;
+    if (ci < 0 || ci >= (int)equipCand_.size()) return;
+    int invIdx = equipCand_[ci];
+    if (invIdx < 0 || invIdx >= (int)inventory_.size()) return;
+    int newId = inventory_[invIdx].id;
+    gm.equip[slot] = newId;
+    if (--inventory_[invIdx].count <= 0) inventory_.erase(inventory_.begin() + invIdx);
+    if (oldId > 0) addInventory(oldId);              // old gear returns to the bag
+    menuMsg_ = (items_.count(newId) ? items_[newId].name : "Item") + " equipped";
+}
+
 void Host::useItem(int invIdx) {
     if (invIdx < 0 || invIdx >= (int)inventory_.size()) return;
     InvSlot& slot = inventory_[invIdx];
     auto it = items_.find(slot.id);
     if (it == items_.end()) { menuMsg_ = "..."; return; }
     const Item& itm = it->second;
-    bool consumable = (itm.atk == 0 && itm.def == 0);    // equipment has atk/def; consumables don't
+    bool consumable = (itm.type == 0);                   // item_type 0 = consumable/key item
     if (!consumable) { menuMsg_ = "Can't use that here."; return; }
     const std::string& d = itm.desc;
     int amt = 0; { size_t i = 0; while (i < d.size() && !std::isdigit((unsigned char)d[i])) ++i;
@@ -809,9 +930,9 @@ void Host::startBattle(int leadId) {
         const GameMember& gm = gameParty_[gi];
         if (gm.charIdx < 0 || gm.charIdx >= (int)chars_.size()) continue;
         const CharRec& c = chars_[gm.charIdx];
-        int weaponAtk = (c.equip[0] > 0 && items_.count(c.equip[0])) ? items_[c.equip[0]].atk : 0;
+        int weaponAtk = (gm.equip[0] > 0 && items_.count(gm.equip[0])) ? items_[gm.equip[0]].atk : 0;
         int armorDef = 0;
-        for (int k = 0; k < 6; ++k) if (c.equip[k] > 0 && items_.count(c.equip[k])) armorDef += items_[c.equip[k]].def;
+        for (int k = 0; k < 6; ++k) if (gm.equip[k] > 0 && items_.count(gm.equip[k])) armorDef += items_[gm.equip[k]].def;
         Combatant cb;
         cb.name = c.name;
         cb.maxhp = (c.hp > 0 ? c.hp : 28 + c.level * 2 + c.vit * 4);

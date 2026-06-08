@@ -15,7 +15,7 @@ namespace ffsmith {
 class Field;
 
 struct Combatant { std::string name; int hp = 0, maxhp = 0, atk = 0, def = 0; bool defending = false; int spd = 8, atb = 0, mp = 0, maxmp = 0, intl = 0, mnd = 0, wpn = 4, level = 1; };
-struct GameMember { int charIdx = -1; int hp = 0, mp = 0; };   // persistent party (current HP/MP)
+struct GameMember { int charIdx = -1; int hp = 0, mp = 0; int equip[6] = {0,0,0,0,0,0}; };   // persistent party (current HP/MP + equipment)
 struct InvSlot    { int id = 0, count = 0; };
 
 struct HostConfig {
@@ -55,6 +55,7 @@ public:
     void startBattle(int monsterId);
     void newGame();
     void selfTestItemUse();      // headless: damage a member, use a Potion, report
+    void selfTestEquip();        // headless: swap a weapon, report stat + inventory change
     const std::vector<GameMember>& gameParty() const { return gameParty_; }
     void setGameParty(std::vector<GameMember> p) { gameParty_ = std::move(p); }
     const std::vector<InvSlot>& inventory() const { return inventory_; }
@@ -102,6 +103,11 @@ private:
     int  physDamage(const Combatant& a, const Combatant& d) const;
     void endBattle();
     void useItem(int invIdx);
+    void buildEquipCandidates(int slot);
+    void swapEquip(int slot, int pick);
+    bool slotAcceptsItem(int slot, const Item& it) const;
+    void addInventory(int id, int count = 1);
+    int  curMember() const;
     int  memberMaxHp(int i) const;
     int  memberMaxMp(int i) const;
     void updateDebug(const InputState& in);
@@ -147,6 +153,8 @@ private:
     int btlPhase_ = 0, btlCmd_ = 0, btlMember_ = 0;
     std::vector<GameMember> gameParty_;
     std::string menuMsg_;          // transient item-use feedback
+    int equipSlot_ = 0, equipSub_ = 0, equipPick_ = 0;   // equip page: slot cursor / submenu / candidate cursor
+    std::vector<int> equipCand_;   // inventory indices that fit the selected slot
     std::vector<InvSlot> inventory_;
     int gil_ = 0;
     bool curIsEnemy_ = false;

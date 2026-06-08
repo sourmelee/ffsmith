@@ -47,7 +47,7 @@ Font load_font(const std::string& texPath, const std::string& metaPath);
 std::vector<std::string> list_maps(const std::string& bundleDir);    // map keys, sorted by g/p/m
 std::vector<int>         list_sprites(const std::string& bundleDir);  // unique fldchr ids, sorted
 
-struct Item    { int id = 0; std::string name, desc; int atk = 0, def = 0; };  // atk=weapon, def=armor
+struct Item    { int id = 0; std::string name, desc; int atk = 0, def = 0, type = 0; };  // atk=weapon, def=armor, type=item_type category
 struct CharRec { int id = 0; std::string name; int equip[6] = {0,0,0,0,0,0};
                  int job = 0, level = 1, str = 0, spd = 0, vit = 0, intl = 0, mnd = 0, hp = 0, mp = 0; };
 std::vector<Item>    load_items(const std::string& path);   // data/items.bin
