@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 #include <ctime>
 #include <memory>
 #include <string>
@@ -77,6 +78,39 @@ static void dump_events(const FfMap& m, int tile) {
     }
 }
 
+struct SaveData { bool ok = false; std::string map; int x = 0, y = 0, facing = 0, img = -1; };
+
+static bool writeSave(const std::string& bundle, const std::string& mk, int x, int y, int facing, int img) {
+    FILE* f = std::fopen((bundle + "/save.dat").c_str(), "wb");
+    if (!f) return false;
+    std::fwrite("FSAV", 1, 4, f);
+    uint8_t ver = 1; std::fwrite(&ver, 1, 1, f);
+    uint16_t mlen = (uint16_t)mk.size(); std::fwrite(&mlen, 2, 1, f); std::fwrite(mk.data(), 1, mk.size(), f);
+    uint16_t ux = (uint16_t)x, uy = (uint16_t)y; std::fwrite(&ux, 2, 1, f); std::fwrite(&uy, 2, 1, f);
+    uint8_t uf = (uint8_t)facing; std::fwrite(&uf, 1, 1, f);
+    int32_t im = img; std::fwrite(&im, 4, 1, f);
+    std::fclose(f);
+    std::printf("[FFSmith] saved -> %s/save.dat (%s @%d,%d face %d img %d)\n", bundle.c_str(), mk.c_str(), x, y, facing, img);
+    return true;
+}
+
+static SaveData readSave(const std::string& bundle) {
+    SaveData sd;
+    FILE* f = std::fopen((bundle + "/save.dat").c_str(), "rb");
+    if (!f) return sd;
+    char mag[4];
+    if (std::fread(mag, 1, 4, f) != 4 || std::memcmp(mag, "FSAV", 4) != 0) { std::fclose(f); return sd; }
+    uint8_t ver = 0; if (std::fread(&ver, 1, 1, f) != 1) { std::fclose(f); return sd; }
+    uint16_t mlen = 0; std::fread(&mlen, 2, 1, f);
+    sd.map.resize(mlen); if (mlen) std::fread(&sd.map[0], 1, mlen, f);
+    uint16_t ux = 0, uy = 0; std::fread(&ux, 2, 1, f); std::fread(&uy, 2, 1, f);
+    uint8_t uf = 0; std::fread(&uf, 1, 1, f);
+    int32_t im = -1; std::fread(&im, 4, 1, f);
+    std::fclose(f);
+    sd.x = ux; sd.y = uy; sd.facing = uf; sd.img = im; sd.ok = true;
+    return sd;
+}
+
 int main(int argc, char** argv) {
     SDL_SetMainReady();
     std::srand((unsigned)std::time(nullptr));
@@ -88,7 +122,7 @@ int main(int argc, char** argv) {
     bool startTitle = false, openMenuFlag = false;
     bool debugMode = false, dbgNoclip = false, dbgOverlay = false, dbgHud = false;
     int menuPageFlag = 0, battleMon = -1, battleSim = -1;
-    bool spellTest = false;
+    bool spellTest = false, saveFlag = false, loadFlag = false;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
         if      (!std::strcmp(a, "--bundle")) bundle = takeStr(argc, argv, i, "");
@@ -107,6 +141,8 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--battle")) battleMon = takeInt(argc, argv, i, 1);
         else if (!std::strcmp(a, "--battlesim")) battleSim = takeInt(argc, argv, i, 1);
         else if (!std::strcmp(a, "--spelltest")) spellTest = true;
+        else if (!std::strcmp(a, "--save")) saveFlag = true;
+        else if (!std::strcmp(a, "--load")) loadFlag = true;
         else if (!std::strcmp(a, "--debug")) debugMode = true;
         else if (!std::strcmp(a, "--noclip")) dbgNoclip = true;
         else if (!std::strcmp(a, "--overlay")) dbgOverlay = true;
@@ -131,6 +167,12 @@ int main(int argc, char** argv) {
         else { Host host(cfg); if (!host.init()) return 1; return host.run(); }
     }
 
+    int loadedFacing = -1;
+    if (loadFlag) {
+        SaveData sd = readSave(bundle);
+        if (sd.ok) { map = sd.map; startCol = sd.x; startRow = sd.y; if (sd.img >= 0) playerImg = sd.img; loadedFacing = sd.facing;
+                     std::printf("[FFSmith] continue: %s @%d,%d\n", map.c_str(), sd.x, sd.y); }
+    }
     FfMap m = load_ffmap(bundle + "/maps/" + map + ".ffmap");
     if (!m.valid()) { std::fprintf(stderr, "[FFSmith] failed to load %s/maps/%s.ffmap\n", bundle.c_str(), map.c_str()); return 1; }
     Texture fb = compose_map(bundle, m);
@@ -149,6 +191,8 @@ int main(int argc, char** argv) {
     if (events_mode) { dump_events(m, tile); return 0; }
 
     std::unique_ptr<Field> field = std::make_unique<Field>(&m, tile, startCol, startRow);
+    if (loadedFacing >= 0) field->setFacing(loadedFacing);
+    std::string curMap = map;
 
     // Reload a map in place (warp). m/fb/field are reassigned; host updated if given.
     auto loadInto = [&](const std::string& key, int sc, int sr, Host* host) -> bool {
@@ -162,6 +206,7 @@ int main(int argc, char** argv) {
         if (sr < 0) sr = m.h / 2; else if (sr >= m.h) sr = m.h - 1;
         field = std::make_unique<Field>(&m, t, sc, sr);
         if (host) { host->setField(field.get(), fb); host->loadText(bundle, bankOf(key)); }
+        curMap = key;
         return true;
     };
 
@@ -192,6 +237,8 @@ int main(int argc, char** argv) {
 
     if (playerImg < 0)
         for (const auto& e : m.events) if (e.img > 0) { playerImg = e.img; break; }
+
+    if (saveFlag) { writeSave(bundle, map, startCol, startRow, face < 0 ? 0 : face, playerImg); return 0; }
 
     Host host(cfg);
     if (!host.init()) return 1;
@@ -226,6 +273,16 @@ int main(int argc, char** argv) {
 
     // Windowed loop: debug-launcher START loads the chosen map; plus cross-map warps.
     while (host.frame()) {
+        if (host.consumeSaveRequest()) writeSave(bundle, curMap, field->col(), field->row(), field->facing(), playerImg);
+        if (host.consumeLoadRequest()) {
+            SaveData sd = readSave(bundle);
+            if (sd.ok && loadInto(sd.map, sd.x, sd.y, &host)) {
+                host.setMapKey(sd.map); curMap = sd.map;
+                if (sd.img >= 0) { host.setPlayerSprite(sd.img, 0); playerImg = sd.img; }
+                field->setFacing(sd.facing); host.setMode(Host::Mode::Field);
+                std::printf("[FFSmith] loaded %s @%d,%d\n", sd.map.c_str(), sd.x, sd.y);
+            }
+        }
         Host::DebugStart ds;
         if (host.consumeDebugStart(ds) && !ds.map.empty() && loadInto(ds.map, ds.x, ds.y, &host)) {
             host.setPlayerSprite(ds.img, 0);

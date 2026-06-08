@@ -195,6 +195,8 @@ void Host::pumpEvents() {
                 if (ev.key.keysym.sym == SDLK_F2 && field_) { field_->setNoClip(!field_->noClip()); break; }
                 if (ev.key.keysym.sym == SDLK_F3) { overlayOn_ = !overlayOn_; break; }
                 if (ev.key.keysym.sym == SDLK_F4) { hudOn_ = !hudOn_; break; }
+                if (ev.key.keysym.sym == SDLK_F5) { saveReq_ = true; break; }
+                if (ev.key.keysym.sym == SDLK_F9) { loadReq_ = true; break; }
                 if (ev.key.keysym.sym == SDLK_b && mode_ == Mode::Field && !monsters_.empty()) { startBattle(-1); break; }
                 if (ev.key.keysym.sym == SDLK_MINUS) { cfg_.scale = std::max(1, cfg_.scale - 1); dbgScale_ = cfg_.scale; break; }
                 if (ev.key.keysym.sym == SDLK_EQUALS || ev.key.keysym.sym == SDLK_PLUS) { cfg_.scale = std::min(8, cfg_.scale + 1); dbgScale_ = cfg_.scale; break; }
@@ -241,8 +243,9 @@ void Host::updateMenu(const InputState& in) {
                 case 0: menuPage_ = 1; pageCursor_ = 0; pageScroll_ = 0; break;  // Item
                 case 1: menuPage_ = 2; pageChar_ = 0; break;                      // Equip
                 case 2: menuPage_ = 3; pageChar_ = 0; break;                      // Status
+                case 3: saveReq_ = true; menuOpen_ = false; break;                // Save
                 case 4: running_ = false; break;                                  // Quit
-                default: break;                                                   // Save (stub)
+                default: break;
             }
         }
     } else if (menuPage_ == 1) {                            // Item list

@@ -225,7 +225,7 @@ Player walks a real map with correct tile collision, map-edge behavior (wrap vs.
 | M4 | **✅ Game state machine** (mode dispatch mirroring `GameClass::MainFunc`: Boot/Title/Field/Battle; Menu/Dialog = overlays) | title (real `TitleLogo`) → field (Start/Z) → menu overlay (Enter/X) verified by screenshot |
 | M5 | **◑ Menu pages** — Item/Equip/Status show real baked data (items + roster + equipment); use/equip **actions** need party+save (M5 cont.) | screenshots: 500-item list, Sol's Orichalcum, ATK 23 |
 | M6 | **◑ Battle** — turn-based loop (Attack/Defend/Run) vs a **group** of 1-3 real enemies (difficulty-banded, dup-name A/B) with **target select** + per-enemy turns, named party, HP/win-lose; real stats + ATB + magic + exact formula = M6 cont. | `--battlesim`: Goblin+Wererat→Victory; 3-enemy group screenshot |
-| M7 | Save/load | round-trip a save |
+| M7 | **◑ Save/load** — field-state persistence (`save.dat`: map+pos+facing+sprite); menu Save / F5 / F9 / `--load`. Full party/inventory/flag save = grows with persistent state | save m501@(6,11) → reload resumes verified |
 
 M2 is the immediate objective; everything in Part 3 precedes it.
 

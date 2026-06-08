@@ -46,6 +46,10 @@ public:
     void openMenu() { menuOpen_ = true; menuCursor_ = 0; menuPage_ = 0; }
     bool loadMenuData(const std::string& bundleDir);   // data/items.bin + chars.bin
     void openMenuPage(int pg) { menuOpen_ = true; menuPage_ = pg; pageCursor_ = 0; pageScroll_ = 0; pageChar_ = 0; }
+    void requestSave() { saveReq_ = true; menuOpen_ = false; }
+    void requestLoad() { loadReq_ = true; }
+    bool consumeSaveRequest() { bool b = saveReq_; saveReq_ = false; return b; }
+    bool consumeLoadRequest() { bool b = loadReq_; loadReq_ = false; return b; }
     void startBattle(int monsterId);
     int  simBattle(int monsterId);   // headless: auto-attack to the end (verification)
     void debugOpenMagic();           // debug: open the Magic spell menu for a screenshot
@@ -116,6 +120,7 @@ private:
     bool dbgNoclip_ = false, dbgOverlay_ = false, dbgHud_ = true, dbgStart_ = false;
     int  dbgScale_ = 3;
     bool overlayOn_ = false, hudOn_ = false;
+    bool saveReq_ = false, loadReq_ = false;
     std::string mapKey_;
     std::unordered_map<int, Item> items_;
     std::vector<int> itemIds_;
