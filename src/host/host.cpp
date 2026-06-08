@@ -60,9 +60,62 @@ void Host::setMap(const Texture& fb) {
     SDL_RenderSetLogicalSize(renderer_, fb.w, fb.h);
 }
 
+void Host::loadChipAnim(const std::string& dir) {
+    chipAnim_ = load_chipanim(dir + "/data/chipanim.bin");
+    size_t total = 0; for (auto& kv : chipAnim_) total += kv.second.size();
+    std::printf("[FFSmith] chip anim: %zu tilesets, %zu animated chips\n", chipAnim_.size(), total);
+}
+
+SDL_Texture* Host::slotSheet(int mc, int var, int& w, int& h) {
+    if (mc < 0) return nullptr;
+    int key = mc * 100 + var;
+    auto it = sheets_.find(key);
+    if (it != sheets_.end()) { if (it->second) SDL_QueryTexture(it->second, nullptr, nullptr, &w, &h); return it->second; }
+    SDL_Texture* tex = nullptr; Texture t;
+    for (int v : { var, 0 }) {
+        char path[512]; std::snprintf(path, sizeof(path), "%s/tex/mc%d_%d.tex", bundleDir_.c_str(), mc, v);
+        t = load_tex(path); if (t.valid()) break;
+    }
+    if (t.valid()) {
+        tex = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, t.w, t.h);
+        if (tex) { SDL_UpdateTexture(tex, nullptr, t.rgba.data(), t.w * 4); SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND); }
+    }
+    sheets_[key] = tex; if (tex) { w = t.w; h = t.h; }
+    return tex;
+}
+
+void Host::buildAnimCells() {
+    animCells_.clear();
+    if (!field_ || chipAnim_.empty()) return;
+    const FfMap* mp = field_->map(); if (!mp) return;
+    int ncells = mp->w * mp->h;
+    for (int i = 0; i < ncells; ++i) {
+        int word = 0, high = 0;                          // topmost non-zero chip across layers
+        for (int L = (int)mp->layers.size() - 1; L >= 0; --L)
+            if (i < (int)mp->layers[L].size()) { uint16_t wd = mp->layers[L][i]; if (wd) { word = wd; high = wd >> 8; break; } }
+        if (!word) continue;
+        int mc  = (high == 1 && mp->mc_slot1 >= 0) ? mp->mc_slot1 : mp->mc_slot0;
+        int var = (high == 1 && mp->mc_slot1 >= 0) ? mp->var_slot1 : mp->var_slot0;
+        int inner = word & 0xff;
+        auto mit = chipAnim_.find(mc); if (mit == chipAnim_.end()) continue;
+        auto cit = mit->second.find(inner); if (cit == mit->second.end()) continue;
+        animCells_.push_back({ i, mc, var, inner, cit->second.type, cit->second.frames, cit->second.speed });
+    }
+    std::printf("[FFSmith] animated cells on map: %zu\n", animCells_.size());
+}
+
+static int animFrameOf(int timer, int type, int frames, int speed) {
+    if (frames <= 1) return 0;
+    int div = speed > 0 ? speed * 8 : 8;                 // ~ticks/frame (exact speed table not decoded)
+    int phase = timer / div;
+    if (type == 1) { int period = (frames - 1) * 2; int t = ((phase % period) + period) % period; return t < frames ? t : period - t; }
+    return ((phase % frames) + frames) % frames;
+}
+
 void Host::setField(Field* f, const Texture& mapImg) {
     if (!ensureMapTexture(mapImg)) return;
     field_ = f;
+    animDirty_ = true;
     SDL_RenderSetLogicalSize(renderer_, 0, 0);
 }
 
@@ -217,6 +270,7 @@ void Host::stepInput() {
 }
 
 void Host::update(double /*dt*/) {
+    ++animTimer_;
     if (mode_ == Mode::Debug) {
         updateDebug(input_);
     } else if (mode_ == Mode::Battle) {
@@ -310,6 +364,25 @@ void Host::render() {
         SDL_Rect dst{ offX, offY, src.w, src.h };
         SDL_RenderCopy(renderer_, map_tex_, &src, &dst);
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+
+        // Animated tiles: overdraw the current frame of each animated cell (under sprites).
+        if (animDirty_ && !chipAnim_.empty()) { buildAnimCells(); animDirty_ = false; }
+        if (!animCells_.empty()) {
+            const FfMap* mp = field_->map();
+            for (const auto& a : animCells_) {
+                int cx = a.idx % mp->w, cy = a.idx / mp->w;
+                int dxp = offX + cx * tile - camX, dyp = offY + cy * tile - camY;
+                if (dxp + tile <= 0 || dyp + tile <= 0 || dxp >= vw || dyp >= vh) continue;
+                int frame = animFrameOf(animTimer_, a.type, a.frames, a.speed);
+                int inner = a.baseInner + frame;
+                int sw = 0, sh = 0; SDL_Texture* sheet = slotSheet(a.mc, a.var, sw, sh);
+                if (!sheet) continue;
+                int tcols = tile > 0 ? sw / tile : 0; if (tcols <= 0) continue;
+                SDL_Rect ss{ (inner % tcols) * tile, (inner / tcols) * tile, tile, tile };
+                SDL_Rect dd{ dxp, dyp, tile, tile };
+                SDL_RenderCopy(renderer_, sheet, &ss, &dd);
+            }
+        }
 
         // NPC sprites (or faint marker for script-only triggers)
         for (const auto& e : field_->map()->events) {
@@ -561,6 +634,7 @@ bool Host::loadMenuData(const std::string& dir) {
         if (btlbgTex_) { SDL_UpdateTexture(btlbgTex_, nullptr, bg.rgba.data(), bg.w * 4); SDL_SetTextureBlendMode(btlbgTex_, SDL_BLENDMODE_BLEND); }
     }
     if (gameParty_.empty() && !chars_.empty()) newGame();
+    loadChipAnim(dir);
     std::printf("[FFSmith] menu data: %zu items, %zu chars, %zu monsters; party %zu\n", items_.size(), chars_.size(), monsters_.size(), gameParty_.size());
     return !items_.empty() || !chars_.empty();
 }

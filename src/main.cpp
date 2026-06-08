@@ -143,6 +143,7 @@ int main(int argc, char** argv) {
     bool debugMode = false, dbgNoclip = false, dbgOverlay = false, dbgHud = false;
     int menuPageFlag = 0, battleMon = -1, battleSim = -1;
     bool spellTest = false, saveFlag = false, loadFlag = false, itemTest = false, equipTest = false;
+    int animTick = 0;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
         if      (!std::strcmp(a, "--bundle")) bundle = takeStr(argc, argv, i, "");
@@ -162,6 +163,7 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--battlesim")) battleSim = takeInt(argc, argv, i, 1);
         else if (!std::strcmp(a, "--spelltest")) spellTest = true;
         else if (!std::strcmp(a, "--itemtest")) itemTest = true;
+        else if (!std::strcmp(a, "--animtick")) animTick = takeInt(argc, argv, i, 0);
         else if (!std::strcmp(a, "--equiptest")) equipTest = true;
         else if (!std::strcmp(a, "--save")) saveFlag = true;
         else if (!std::strcmp(a, "--load")) loadFlag = true;
@@ -289,6 +291,7 @@ int main(int argc, char** argv) {
     if (spellTest) { host.startBattle(1); host.debugOpenMagic(); }
     if (battleSim >= 0) { host.simBattle(battleSim); return 0; }
 
+    if (animTick > 0) host.setAnimTick(animTick);
     if (!fieldshot.empty()) {
         if (face >= 0) { InputState in; in.held = (uint32_t)(face==0?BTN_DOWN:face==1?BTN_UP:face==2?BTN_LEFT:BTN_RIGHT); field->update(in); }
         bool ok = host.shotField(fieldshot);

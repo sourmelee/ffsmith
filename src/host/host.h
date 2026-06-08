@@ -42,6 +42,8 @@ public:
     bool frame();   // one loop iteration; false when quit (lets caller swap maps on warp)
     void setMap(const Texture& fb);
     void setField(Field* f, const Texture& mapImg);
+    void loadChipAnim(const std::string& bundleDir);
+    void setAnimTick(int t) { animTimer_ = t; }
     void setBundleDir(const std::string& d) { bundleDir_ = d; }
     void setPlayerSprite(int img, int var) { playerImg_ = img; playerVar_ = var; }
     void setMode(Mode m) { mode_ = m; }
@@ -124,6 +126,14 @@ private:
     std::string   bundleDir_;
     int           playerImg_ = -1, playerVar_ = 0;
     std::unordered_map<int, SDL_Texture*> sprites_;   // key = img*100+var
+    std::unordered_map<int, SDL_Texture*> sheets_;    // tilesheets for anim overdraw (mc*100+var)
+    std::unordered_map<int, std::unordered_map<int, ChipAnim>> chipAnim_;   // mc -> inner -> anim
+    struct AnimCell { int idx, mc, var, baseInner, type, frames, speed; };
+    std::vector<AnimCell> animCells_;
+    bool animDirty_ = true;
+    int animTimer_ = 0;
+    void buildAnimCells();
+    SDL_Texture* slotSheet(int mc, int var, int& w, int& h);
     SDL_Texture*  fontTex_ = nullptr;
     int           fcw_ = 0, fch_ = 0, fcols_ = 0, ffirst_ = 32;
     std::unordered_map<int, std::string> messages_;

@@ -267,4 +267,21 @@ std::vector<Spell> load_spells(const std::string& path) {
     return out;
 }
 
+std::unordered_map<int, std::unordered_map<int, ChipAnim>> load_chipanim(const std::string& path) {
+    std::unordered_map<int, std::unordered_map<int, ChipAnim>> out;
+    auto buf = read_file(path);
+    if (buf.size() < 8 || std::memcmp(buf.data(), "FCAN", 4) != 0) return out;
+    uint32_t nt = rd_u32(&buf[4]); size_t o = 8;
+    for (uint32_t t = 0; t < nt && o + 4 <= buf.size(); ++t) {
+        int mc = rd_u16(&buf[o]); int cnt = rd_u16(&buf[o + 2]); o += 4;
+        auto& m = out[mc];
+        for (int i = 0; i < cnt && o + 5 <= buf.size(); ++i) {
+            int inner = rd_u16(&buf[o]);
+            ChipAnim a; a.type = buf[o + 2]; a.frames = buf[o + 3]; a.speed = buf[o + 4]; o += 5;
+            m[inner] = a;
+        }
+    }
+    return out;
+}
+
 }  // namespace ffsmith

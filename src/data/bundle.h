@@ -33,6 +33,9 @@ struct FfMap {
 };
 
 Texture load_tex(const std::string& path);
+
+struct ChipAnim { int type = 0, frames = 1, speed = 1; };  // animated chip (FieldClass::GetUpdateChipID)
+std::unordered_map<int, std::unordered_map<int, ChipAnim>> load_chipanim(const std::string& path);
 FfMap   load_ffmap(const std::string& path);
 bool    save_tex(const std::string& path, const Texture& t);
 std::string find_map_key(const std::string& bundleDir, int mapId);  // resolve MapChange target

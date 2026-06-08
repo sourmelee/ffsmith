@@ -38,6 +38,8 @@ cmake --build build
 
 On Windows: install SDL2 (e.g. `vcpkg install sdl2`, or the SDL2 development package) and configure CMake with the vcpkg toolchain or `-DSDL2_DIR=...` as usual.
 
+- **Field polish — animated tiles + smooth camera: ✅.** Water/torch **tile animation** is driven by the real chip attributes (`FieldClass::GetUpdateChipID`): in `capk.dat`'s 7-byte chip record (word A) bit 8 = animated, bits 9-10 = type (loop / ping-pong), bits 11-14 = frames, bits 15-17 = speed. The toolkit (0.7.14) bakes `data/chipanim.bin` (per-tileset animated chips; 1136, all 3-frame); the engine cycles `base..base+frames-1` and **overdraws the current frame** of each animated cell (under sprites) each tick. Verified: the overworld's 22,307 water cells ripple across 3 frames (`--animtick 0|8|16`, 281k px change/frame). The **camera** already follows the player's interpolated pixel position (`pixelX/pixelY`+`prog_`) with edge clamping = pixel-smooth scroll.
+
 ## Run / controls
 
 ```sh
