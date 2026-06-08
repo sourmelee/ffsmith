@@ -25,6 +25,7 @@ struct FfMap {
     int w = 0, h = 0, n_layers = 0;
     int mc_slot0 = -1, var_slot0 = 0;
     int mc_slot1 = -1, var_slot1 = 0;
+    int overhead_threshold = 0;   // layers with index > this are overhead (FieldClass+0xdc2c)
     std::vector<std::vector<uint16_t>> layers;
     std::vector<uint8_t> event;     // raw event region (legacy; events[] is structured)
     std::vector<uint8_t> pass;      // per-cell 4-dir pass nibble (0 = solid)

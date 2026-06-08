@@ -202,12 +202,12 @@ int main(int argc, char** argv) {
     }
     FfMap m = load_ffmap(bundle + "/maps/" + map + ".ffmap");
     if (!m.valid()) { std::fprintf(stderr, "[FFSmith] failed to load %s/maps/%s.ffmap\n", bundle.c_str(), map.c_str()); return 1; }
-    Texture fb = compose_range(bundle, m, 0, 1, true);                    // ground = layer 0
-    Texture overheadFb = compose_range(bundle, m, 1, m.n_layers, false);  // overhead = layers 1+
+    Texture fb = compose_range(bundle, m, 0, m.overhead_threshold + 1, true);                       // ground = layers [0..threshold]
+    Texture overheadFb = compose_range(bundle, m, m.overhead_threshold + 1, m.n_layers, false);  // overhead = layers above threshold
     if (!fb.valid()) { std::fprintf(stderr, "[FFSmith] compose failed for %s\n", map.c_str()); return 1; }
     int tile = (m.w > 0) ? fb.w / m.w : 32;
-    std::printf("[FFSmith] %s: %dx%d cells, %d layers, %zu events, tile=%d -> %dx%d px\n",
-                map.c_str(), m.w, m.h, m.n_layers, m.events.size(), tile, fb.w, fb.h);
+    std::printf("[FFSmith] %s: %dx%d cells, %d layers (overhead>L%d), %zu events, tile=%d -> %dx%d px\n",
+                map.c_str(), m.w, m.h, m.n_layers, m.overhead_threshold, m.events.size(), tile, fb.w, fb.h);
     if (startCol < 0 || startCol >= m.w) startCol = m.w / 2;
     if (startRow < 0 || startRow >= m.h) startRow = m.h / 2;
 
@@ -226,14 +226,14 @@ int main(int argc, char** argv) {
     auto loadInto = [&](const std::string& key, int sc, int sr, Host* host) -> bool {
         FfMap nm = load_ffmap(bundle + "/maps/" + key + ".ffmap");
         if (!nm.valid()) return false;
-        Texture nfb = compose_range(bundle, nm, 0, 1, true);
+        Texture nfb = compose_range(bundle, nm, 0, nm.overhead_threshold + 1, true);
         if (!nfb.valid()) return false;
         m = std::move(nm); fb = std::move(nfb);
         int t = (m.w > 0) ? fb.w / m.w : 32;
         if (sc < 0) sc = m.w / 2; else if (sc >= m.w) sc = m.w - 1;
         if (sr < 0) sr = m.h / 2; else if (sr >= m.h) sr = m.h - 1;
         field = std::make_unique<Field>(&m, t, sc, sr);
-        if (host) { host->setField(field.get(), fb); host->setOverhead(compose_range(bundle, m, 1, m.n_layers, false)); host->loadText(bundle, bankOf(key)); }
+        if (host) { host->setField(field.get(), fb); host->setOverhead(compose_range(bundle, m, m.overhead_threshold + 1, m.n_layers, false)); host->loadText(bundle, bankOf(key)); }
         curMap = key;
         return true;
     };
