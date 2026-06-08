@@ -1,4 +1,5 @@
 #include "host/host.h"
+#include <cctype>
 
 #include <SDL.h>
 #include <cstdio>
@@ -240,7 +241,7 @@ void Host::updateMenu(const InputState& in) {
         if (in.pressed & (BTN_CANCEL | BTN_MENU)) menuOpen_ = false;
         if (in.pressed & BTN_CONFIRM) {
             switch (menuCursor_) {
-                case 0: menuPage_ = 1; pageCursor_ = 0; pageScroll_ = 0; break;  // Item
+                case 0: menuPage_ = 1; pageCursor_ = 0; pageScroll_ = 0; menuMsg_.clear(); break;  // Item
                 case 1: menuPage_ = 2; pageChar_ = 0; break;                      // Equip
                 case 2: menuPage_ = 3; pageChar_ = 0; break;                      // Status
                 case 3: saveReq_ = true; menuOpen_ = false; break;                // Save
@@ -248,17 +249,16 @@ void Host::updateMenu(const InputState& in) {
                 default: break;
             }
         }
-    } else if (menuPage_ == 1) {                            // Item list
-        int n = (int)itemIds_.size();
+    } else if (menuPage_ == 1) {                            // Item list (inventory)
+        int n = (int)inventory_.size();
         if (n > 0) {
-            if (in.pressed & BTN_UP)   pageCursor_ = (pageCursor_ + n - 1) % n;
-            if (in.pressed & BTN_DOWN) pageCursor_ = (pageCursor_ + 1) % n;
-            if (in.pressed & BTN_L)    pageCursor_ = std::max(0, pageCursor_ - 10);
-            if (in.pressed & BTN_R)    pageCursor_ = std::min(n - 1, pageCursor_ + 10);
+            if (in.pressed & BTN_UP)      { pageCursor_ = (pageCursor_ + n - 1) % n; menuMsg_.clear(); }
+            if (in.pressed & BTN_DOWN)    { pageCursor_ = (pageCursor_ + 1) % n;     menuMsg_.clear(); }
+            if (in.pressed & BTN_CONFIRM) useItem(pageCursor_);
         }
-        if (in.pressed & (BTN_CANCEL | BTN_MENU)) menuPage_ = 0;
-    } else {                                                // Equip / Status: cycle character
-        int n = (int)chars_.size();
+        if (in.pressed & (BTN_CANCEL | BTN_MENU)) { menuPage_ = 0; menuMsg_.clear(); }
+    } else {                                                // Equip / Status: cycle party member
+        int n = (int)gameParty_.size();
         if (n > 0) {
             if (in.pressed & (BTN_DOWN | BTN_RIGHT)) pageChar_ = (pageChar_ + 1) % n;
             if (in.pressed & (BTN_UP | BTN_LEFT))    pageChar_ = (pageChar_ + n - 1) % n;
@@ -442,46 +442,58 @@ void Host::renderMenu(int vw, int vh) {
 
 void Host::renderItemPage(int px, int py, int pw, int ph) {
     drawText(px + 8, py + 4, "ITEMS", 40, 255, 235, 120);
-    int n = (int)itemIds_.size();
+    std::string g = std::to_string(gil_) + " G";
+    drawText(px + pw - (int)g.size() * fcw_ - 6, py + 4, g, 12, 235, 225, 150);
+    int n = (int)inventory_.size();
     int maxChars = fcw_ > 0 ? (pw - 20) / fcw_ : 30;
     int rowH = fch_ > 0 ? fch_ : 14;
     int descH = rowH * 3 + 6;
-    int listTop = py + 20, listBot = py + ph - descH - 4;
+    int listTop = py + 22, listBot = py + ph - descH - 4;
     int visRows = (listBot - listTop) / rowH; if (visRows < 1) visRows = 1;
+    if (n == 0) { drawText(px + 14, listTop, "(no items)", maxChars, 205, 205, 215); return; }
+    if (pageCursor_ >= n) pageCursor_ = n - 1;
     if (pageCursor_ < pageScroll_) pageScroll_ = pageCursor_;
     if (pageCursor_ >= pageScroll_ + visRows) pageScroll_ = pageCursor_ - visRows + 1;
     if (pageScroll_ < 0) pageScroll_ = 0;
     for (int i = 0; i < visRows && pageScroll_ + i < n; ++i) {
-        int idx = pageScroll_ + i, id = itemIds_[idx];
-        int ty = listTop + i * rowH;
-        bool sel = (idx == pageCursor_);
+        int idx = pageScroll_ + i; const InvSlot& sl = inventory_[idx];
+        int ty = listTop + i * rowH; bool sel = (idx == pageCursor_);
         if (sel) drawText(px + 4, ty, ">", 2, 255, 240, 120);
-        drawText(px + 14, ty, items_[id].name, maxChars, sel ? 255 : 215, 235, sel ? 170 : 255);
+        std::string nm = items_.count(sl.id) ? items_[sl.id].name : ("#" + std::to_string(sl.id));
+        std::string cnt = "x" + std::to_string(sl.count);
+        drawText(px + 14, ty, nm, maxChars - 4, sel ? 255 : 215, 235, sel ? 170 : 255);
+        drawText(px + pw - (int)cnt.size() * fcw_ - 8, ty, cnt, 6, 210, 220, 240);
     }
-    if (n > 0) {
-        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 175);
-        SDL_Rect db{ px + 3, listBot, pw - 6, descH }; SDL_RenderFillRect(renderer_, &db);
-        drawText(px + 8, listBot + 3, items_[itemIds_[pageCursor_]].desc, maxChars - 1, 200, 230, 255);
-        std::string pos = std::to_string(pageCursor_ + 1) + "/" + std::to_string(n);
-        drawText(px + pw - (int)pos.size() * fcw_ - 6, py + 4, pos, 12, 180, 190, 220);
-    }
+    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 175);
+    SDL_Rect db{ px + 3, listBot, pw - 6, descH }; SDL_RenderFillRect(renderer_, &db);
+    int sid = inventory_[pageCursor_].id;
+    if (!menuMsg_.empty()) drawText(px + 8, listBot + 3, menuMsg_, maxChars - 1, 255, 235, 150);
+    else if (items_.count(sid)) drawText(px + 8, listBot + 3, items_[sid].desc, maxChars - 1, 200, 230, 255);
+    drawText(px + 8, listBot + 3 + rowH, "[A] Use   [B] Back", 18, 170, 200, 160);
+    std::string pos = std::to_string(pageCursor_ + 1) + "/" + std::to_string(n);
+    drawText(px + pw - (int)pos.size() * fcw_ - 6, py + 4 + rowH, pos, 12, 180, 190, 220);
 }
 
 void Host::renderCharPage(int px, int py, int pw, int ph, bool status) {
     (void)ph;
     drawText(px + 8, py + 4, status ? "STATUS" : "EQUIP", 40, 255, 235, 120);
-    if (chars_.empty()) { drawText(px + 8, py + 24, "(no character data)", 40, 220, 220, 220); return; }
-    const CharRec& c = chars_[pageChar_ % (int)chars_.size()];
+    if (gameParty_.empty()) { drawText(px + 8, py + 24, "(no party)", 40, 220, 220, 220); return; }
+    int pc = pageChar_ % (int)gameParty_.size();
+    const GameMember& gm = gameParty_[pc];
+    if (gm.charIdx < 0 || gm.charIdx >= (int)chars_.size()) return;
+    const CharRec& c = chars_[gm.charIdx];
     int maxChars = fcw_ > 0 ? (pw - 20) / fcw_ : 30;
-    std::string hdr = "<  " + c.name + "  >   (" + std::to_string(pageChar_ + 1) + "/" + std::to_string(chars_.size()) + ")";
+    std::string hdr = "<  " + c.name + "  >   (" + std::to_string(pc + 1) + "/" + std::to_string(gameParty_.size()) + ")";
     drawText(px + 8, py + 22, hdr, maxChars, 255, 255, 160);
     if (status) {
-        drawText(px + 10, py + 42, "Lv " + std::to_string(c.level) + "   HP " + std::to_string(c.hp) + "   MP " + std::to_string(c.mp), maxChars, 235, 235, 255);
-        drawText(px + 10, py + 42 + fch_ * 2,  "STR " + std::to_string(c.str) + "      SPD " + std::to_string(c.spd), maxChars, 230, 235, 255);
-        drawText(px + 10, py + 42 + fch_ * 3,  "VIT " + std::to_string(c.vit) + "   INT " + std::to_string(c.intl) + "   MND " + std::to_string(c.mnd), maxChars, 230, 235, 255);
+        drawText(px + 10, py + 42, "Lv " + std::to_string(c.level)
+                 + "   HP " + std::to_string(gm.hp) + "/" + std::to_string(memberMaxHp(pc))
+                 + "   MP " + std::to_string(gm.mp) + "/" + std::to_string(memberMaxMp(pc)), maxChars, 235, 235, 255);
+        drawText(px + 10, py + 42 + fch_ * 2, "STR " + std::to_string(c.str) + "      SPD " + std::to_string(c.spd), maxChars, 230, 235, 255);
+        drawText(px + 10, py + 42 + fch_ * 3, "VIT " + std::to_string(c.vit) + "   INT " + std::to_string(c.intl) + "   MND " + std::to_string(c.mnd), maxChars, 230, 235, 255);
         int w0 = c.equip[0];
         std::string wpn = (w0 > 0 && items_.count(w0)) ? items_[w0].name : std::string("-");
-        drawText(px + 10, py + 42 + fch_ * 5,  "Weapon: " + wpn, maxChars, 200, 220, 255);
+        drawText(px + 10, py + 42 + fch_ * 5, "Weapon: " + wpn, maxChars, 200, 220, 255);
     } else {
         for (int k = 0; k < 6; ++k) {
             int ty = py + 42 + k * (fch_ + 2);
@@ -506,7 +518,8 @@ bool Host::loadMenuData(const std::string& dir) {
         btlbgTex_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, bg.w, bg.h);
         if (btlbgTex_) { SDL_UpdateTexture(btlbgTex_, nullptr, bg.rgba.data(), bg.w * 4); SDL_SetTextureBlendMode(btlbgTex_, SDL_BLENDMODE_BLEND); }
     }
-    std::printf("[FFSmith] menu data: %zu items, %zu chars, %zu monsters\n", items_.size(), chars_.size(), monsters_.size());
+    if (gameParty_.empty() && !chars_.empty()) newGame();
+    std::printf("[FFSmith] menu data: %zu items, %zu chars, %zu monsters; party %zu\n", items_.size(), chars_.size(), monsters_.size(), gameParty_.size());
     return !items_.empty() || !chars_.empty();
 }
 
@@ -685,6 +698,76 @@ void Host::beginNextTurn() {
     }
 }
 
+int Host::memberMaxHp(int i) const {
+    if (i < 0 || i >= (int)gameParty_.size()) return 1;
+    int ci = gameParty_[i].charIdx;
+    return (ci >= 0 && ci < (int)chars_.size() && chars_[ci].hp > 0) ? chars_[ci].hp : 30;
+}
+int Host::memberMaxMp(int i) const {
+    if (i < 0 || i >= (int)gameParty_.size()) return 0;
+    int ci = gameParty_[i].charIdx;
+    return (ci >= 0 && ci < (int)chars_.size()) ? chars_[ci].mp : 0;
+}
+
+void Host::newGame() {
+    gameParty_.clear();
+    int n = std::min((int)chars_.size(), 4);
+    for (int i = 0; i < n; ++i) { GameMember m; m.charIdx = i; m.hp = chars_[i].hp > 0 ? chars_[i].hp : 30; m.mp = chars_[i].mp; gameParty_.push_back(m); }
+    inventory_ = { {420, 5} };     // 5 Potions (item 420)
+    gil_ = 500;
+}
+
+void Host::endBattle() {                                    // persist battle HP/MP back to the party
+    for (size_t i = 0; i < party_.size() && i < gameParty_.size(); ++i) {
+        gameParty_[i].hp = std::max(0, party_[i].hp);
+        gameParty_[i].mp = std::max(0, party_[i].mp);
+    }
+    mode_ = Mode::Field;
+}
+
+void Host::selfTestItemUse() {
+    if (gameParty_.empty()) newGame();
+    if (inventory_.empty()) { std::printf("[itemtest] inventory empty\n"); return; }
+    int m = 0, before = inventory_[0].count;
+    gameParty_[m].hp = 1;
+    std::printf("[itemtest] %s HP %d/%d, holding %s x%d\n",
+                chars_[gameParty_[m].charIdx].name.c_str(), gameParty_[m].hp, memberMaxHp(m),
+                items_.count(inventory_[0].id) ? items_[inventory_[0].id].name.c_str() : "?", before);
+    useItem(0);
+    int after = inventory_.empty() ? 0 : inventory_[0].count;
+    std::printf("[itemtest] -> %s HP now %d/%d, Potion x%d   msg=\"%s\"\n",
+                chars_[gameParty_[m].charIdx].name.c_str(), gameParty_[m].hp, memberMaxHp(m), after, menuMsg_.c_str());
+}
+
+void Host::useItem(int invIdx) {
+    if (invIdx < 0 || invIdx >= (int)inventory_.size()) return;
+    InvSlot& slot = inventory_[invIdx];
+    auto it = items_.find(slot.id);
+    if (it == items_.end()) { menuMsg_ = "..."; return; }
+    const Item& itm = it->second;
+    bool consumable = (itm.atk == 0 && itm.def == 0);    // equipment has atk/def; consumables don't
+    if (!consumable) { menuMsg_ = "Can't use that here."; return; }
+    const std::string& d = itm.desc;
+    int amt = 0; { size_t i = 0; while (i < d.size() && !std::isdigit((unsigned char)d[i])) ++i;
+                   while (i < d.size() && std::isdigit((unsigned char)d[i])) amt = amt * 10 + (d[i++] - '0'); }
+    bool mp = (d.find("MP") != std::string::npos && d.find("HP") == std::string::npos);
+    if (amt <= 0) amt = mp ? 50 : 100;                   // Potion-tier default
+    int tgt = -1; double lo = 2.0;                        // most-wounded living member
+    for (int i = 0; i < (int)gameParty_.size(); ++i) {
+        if (gameParty_[i].hp <= 0) continue;
+        double r = mp ? (double)gameParty_[i].mp / std::max(1, memberMaxMp(i))
+                      : (double)gameParty_[i].hp / std::max(1, memberMaxHp(i));
+        if (r < lo) { lo = r; tgt = i; }
+    }
+    if (tgt < 0) { menuMsg_ = "No valid target."; return; }
+    if (mp) gameParty_[tgt].mp = std::min(memberMaxMp(tgt), gameParty_[tgt].mp + amt);
+    else    gameParty_[tgt].hp = std::min(memberMaxHp(tgt), gameParty_[tgt].hp + amt);
+    std::string nm = chars_[gameParty_[tgt].charIdx].name;
+    menuMsg_ = nm + "  +" + std::to_string(amt) + (mp ? " MP" : " HP");
+    if (--slot.count <= 0) { inventory_.erase(inventory_.begin() + invIdx);
+                             if (pageCursor_ >= (int)inventory_.size()) pageCursor_ = std::max(0, (int)inventory_.size() - 1); }
+}
+
 void Host::startBattle(int leadId) {
     enemies_.clear();
     const Monster* lead = nullptr;
@@ -721,20 +804,24 @@ void Host::startBattle(int leadId) {
         if (total[base] > 1) { e.name = base + " " + std::string(1, char('A' + idx[base])); idx[base]++; }
     }
     party_.clear();
-    int n = std::min((int)chars_.size(), 4);
-    for (int i = 0; i < n; ++i) {
-        const CharRec& c = chars_[i];
+    if (gameParty_.empty()) newGame();
+    for (size_t gi = 0; gi < gameParty_.size(); ++gi) {
+        const GameMember& gm = gameParty_[gi];
+        if (gm.charIdx < 0 || gm.charIdx >= (int)chars_.size()) continue;
+        const CharRec& c = chars_[gm.charIdx];
         int weaponAtk = (c.equip[0] > 0 && items_.count(c.equip[0])) ? items_[c.equip[0]].atk : 0;
         int armorDef = 0;
         for (int k = 0; k < 6; ++k) if (c.equip[k] > 0 && items_.count(c.equip[k])) armorDef += items_[c.equip[k]].def;
         Combatant cb;
         cb.name = c.name;
-        cb.hp = cb.maxhp = (c.hp > 0 ? c.hp : 28 + c.level * 2 + c.vit * 4);  // real max-HP (growth table)
-        cb.atk = std::max(1, c.str);                        // A = real STR (attack stat)
+        cb.maxhp = (c.hp > 0 ? c.hp : 28 + c.level * 2 + c.vit * 4);
+        cb.hp = std::max(0, std::min(gm.hp, cb.maxhp));     // CURRENT hp (carries between battles)
+        cb.maxmp = c.mp; cb.mp = std::max(0, std::min(gm.mp, cb.maxmp));
+        cb.atk = std::max(1, c.str);                        // A = real STR
         cb.wpn = std::max(3, weaponAtk);                    // W = equipped weapon ATK
         cb.def = std::max(1, c.vit + armorDef + c.level / 2);
         cb.level = c.level; cb.spd = std::max(1, c.spd);
-        cb.mp = cb.maxmp = c.mp; cb.intl = c.intl; cb.mnd = c.mnd;
+        cb.intl = c.intl; cb.mnd = c.mnd;
         party_.push_back(cb);
     }
     if (party_.empty()) { Combatant cb; cb.name = "Hero"; cb.hp = cb.maxhp = 34; cb.atk = 13; cb.wpn = 6; cb.def = 6; party_.push_back(cb); }
@@ -775,7 +862,7 @@ void Host::updateBattle(const InputState& in) {
             } else if (btlCmd_ == 2) {                       // Defend
                 party_[btlMember_].defending = true; btlMsg_ = party_[btlMember_].name + " defends."; btlPhase_ = 1;
             } else {                                         // Run
-                if (std::rand() % 2 == 0) { mode_ = Mode::Field; return; }
+                if (std::rand() % 2 == 0) { endBattle(); return; }
                 btlMsg_ = "Couldn't escape!"; btlPhase_ = 1;
             }
         }
@@ -820,7 +907,7 @@ void Host::updateBattle(const InputState& in) {
             beginNextTurn();
         }
     } else {                                                 // 3 win / 4 lose
-        if (in.pressed & BTN_CONFIRM) mode_ = Mode::Field;
+        if (in.pressed & BTN_CONFIRM) endBattle();
     }
 }
 
@@ -906,6 +993,10 @@ int Host::simBattle(int monsterId) {
     }
     std::printf("  [sim] -> %s in %d steps (partyAlive=%d, enemiesAlive=%d)\n",
                 (partyAlive() && !enemiesAlive()) ? "VICTORY" : "DEFEAT", guard, (int)partyAlive(), (int)enemiesAlive());
+    std::printf("  [sim] persistent party:");
+    for (size_t i = 0; i < gameParty_.size(); ++i)
+        std::printf(" %s=%d/%d", chars_[gameParty_[i].charIdx].name.c_str(), gameParty_[i].hp, memberMaxHp((int)i));
+    std::printf("\n");
     return partyAlive() ? 1 : 0;
 }
 

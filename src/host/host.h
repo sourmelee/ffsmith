@@ -15,6 +15,8 @@ namespace ffsmith {
 class Field;
 
 struct Combatant { std::string name; int hp = 0, maxhp = 0, atk = 0, def = 0; bool defending = false; int spd = 8, atb = 0, mp = 0, maxmp = 0, intl = 0, mnd = 0, wpn = 4, level = 1; };
+struct GameMember { int charIdx = -1; int hp = 0, mp = 0; };   // persistent party (current HP/MP)
+struct InvSlot    { int id = 0, count = 0; };
 
 struct HostConfig {
     int logical_width  = 256;
@@ -51,6 +53,14 @@ public:
     bool consumeSaveRequest() { bool b = saveReq_; saveReq_ = false; return b; }
     bool consumeLoadRequest() { bool b = loadReq_; loadReq_ = false; return b; }
     void startBattle(int monsterId);
+    void newGame();
+    void selfTestItemUse();      // headless: damage a member, use a Potion, report
+    const std::vector<GameMember>& gameParty() const { return gameParty_; }
+    void setGameParty(std::vector<GameMember> p) { gameParty_ = std::move(p); }
+    const std::vector<InvSlot>& inventory() const { return inventory_; }
+    void setInventory(std::vector<InvSlot> v) { inventory_ = std::move(v); }
+    int  gil() const { return gil_; }
+    void setGil(int g) { gil_ = g; }
     int  simBattle(int monsterId);   // headless: auto-attack to the end (verification)
     void debugOpenMagic();           // debug: open the Magic spell menu for a screenshot
     bool loadTitle(const std::string& bundleDir);   // ui/title.tex
@@ -90,6 +100,10 @@ private:
     void buildSpellList();
     void castOn(int targetIsEnemy, int idx);
     int  physDamage(const Combatant& a, const Combatant& d) const;
+    void endBattle();
+    void useItem(int invIdx);
+    int  memberMaxHp(int i) const;
+    int  memberMaxMp(int i) const;
     void updateDebug(const InputState& in);
     void renderDebug();
     void drawText(int x, int y, const std::string& s, int maxChars, uint8_t r, uint8_t g, uint8_t b);
@@ -131,6 +145,10 @@ private:
     int target_ = 0, enemyActor_ = 0;
     std::vector<Combatant> party_;
     int btlPhase_ = 0, btlCmd_ = 0, btlMember_ = 0;
+    std::vector<GameMember> gameParty_;
+    std::string menuMsg_;          // transient item-use feedback
+    std::vector<InvSlot> inventory_;
+    int gil_ = 0;
     bool curIsEnemy_ = false;
     int  curIdx_ = 0;
     std::vector<Spell> spells_;

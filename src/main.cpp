@@ -78,19 +78,29 @@ static void dump_events(const FfMap& m, int tile) {
     }
 }
 
-struct SaveData { bool ok = false; std::string map; int x = 0, y = 0, facing = 0, img = -1; };
+struct SaveData { bool ok = false; std::string map; int x = 0, y = 0, facing = 0, img = -1;
+                  bool hasState = false; std::vector<GameMember> party; std::vector<InvSlot> inv; int gil = 0; };
 
-static bool writeSave(const std::string& bundle, const std::string& mk, int x, int y, int facing, int img) {
+static bool writeSave(const std::string& bundle, const std::string& mk, int x, int y, int facing, int img, const Host& host) {
     FILE* f = std::fopen((bundle + "/save.dat").c_str(), "wb");
     if (!f) return false;
     std::fwrite("FSAV", 1, 4, f);
-    uint8_t ver = 1; std::fwrite(&ver, 1, 1, f);
+    uint8_t ver = 2; std::fwrite(&ver, 1, 1, f);
     uint16_t mlen = (uint16_t)mk.size(); std::fwrite(&mlen, 2, 1, f); std::fwrite(mk.data(), 1, mk.size(), f);
     uint16_t ux = (uint16_t)x, uy = (uint16_t)y; std::fwrite(&ux, 2, 1, f); std::fwrite(&uy, 2, 1, f);
     uint8_t uf = (uint8_t)facing; std::fwrite(&uf, 1, 1, f);
     int32_t im = img; std::fwrite(&im, 4, 1, f);
+    // v2: persistent party (current HP/MP), inventory, gil
+    const auto& party = host.gameParty();
+    uint8_t pc = (uint8_t)party.size(); std::fwrite(&pc, 1, 1, f);
+    for (const auto& gm : party) { int32_t v[3] = { gm.charIdx, gm.hp, gm.mp }; std::fwrite(v, 4, 3, f); }
+    const auto& inv = host.inventory();
+    uint16_t ic = (uint16_t)inv.size(); std::fwrite(&ic, 2, 1, f);
+    for (const auto& sl : inv) { int32_t v[2] = { sl.id, sl.count }; std::fwrite(v, 4, 2, f); }
+    int32_t gil = host.gil(); std::fwrite(&gil, 4, 1, f);
     std::fclose(f);
-    std::printf("[FFSmith] saved -> %s/save.dat (%s @%d,%d face %d img %d)\n", bundle.c_str(), mk.c_str(), x, y, facing, img);
+    std::printf("[FFSmith] saved -> %s/save.dat (%s @%d,%d face %d img %d; party %u, inv %u, gil %d)\n",
+                bundle.c_str(), mk.c_str(), x, y, facing, img, (unsigned)pc, (unsigned)ic, gil);
     return true;
 }
 
@@ -106,8 +116,15 @@ static SaveData readSave(const std::string& bundle) {
     uint16_t ux = 0, uy = 0; std::fread(&ux, 2, 1, f); std::fread(&uy, 2, 1, f);
     uint8_t uf = 0; std::fread(&uf, 1, 1, f);
     int32_t im = -1; std::fread(&im, 4, 1, f);
-    std::fclose(f);
     sd.x = ux; sd.y = uy; sd.facing = uf; sd.img = im; sd.ok = true;
+    if (ver >= 2) {
+        uint8_t pc = 0; std::fread(&pc, 1, 1, f);
+        for (int i = 0; i < pc; ++i) { int32_t v[3] = {0,0,0}; std::fread(v, 4, 3, f); GameMember gm; gm.charIdx = v[0]; gm.hp = v[1]; gm.mp = v[2]; sd.party.push_back(gm); }
+        uint16_t ic = 0; std::fread(&ic, 2, 1, f);
+        for (int i = 0; i < ic; ++i) { int32_t v[2] = {0,0}; std::fread(v, 4, 2, f); InvSlot sl; sl.id = v[0]; sl.count = v[1]; sd.inv.push_back(sl); }
+        int32_t gil = 0; std::fread(&gil, 4, 1, f); sd.gil = gil; sd.hasState = true;
+    }
+    std::fclose(f);
     return sd;
 }
 
@@ -122,7 +139,7 @@ int main(int argc, char** argv) {
     bool startTitle = false, openMenuFlag = false;
     bool debugMode = false, dbgNoclip = false, dbgOverlay = false, dbgHud = false;
     int menuPageFlag = 0, battleMon = -1, battleSim = -1;
-    bool spellTest = false, saveFlag = false, loadFlag = false;
+    bool spellTest = false, saveFlag = false, loadFlag = false, itemTest = false;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
         if      (!std::strcmp(a, "--bundle")) bundle = takeStr(argc, argv, i, "");
@@ -141,6 +158,7 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--battle")) battleMon = takeInt(argc, argv, i, 1);
         else if (!std::strcmp(a, "--battlesim")) battleSim = takeInt(argc, argv, i, 1);
         else if (!std::strcmp(a, "--spelltest")) spellTest = true;
+        else if (!std::strcmp(a, "--itemtest")) itemTest = true;
         else if (!std::strcmp(a, "--save")) saveFlag = true;
         else if (!std::strcmp(a, "--load")) loadFlag = true;
         else if (!std::strcmp(a, "--debug")) debugMode = true;
@@ -168,10 +186,11 @@ int main(int argc, char** argv) {
     }
 
     int loadedFacing = -1;
+    SaveData bootSave;
     if (loadFlag) {
-        SaveData sd = readSave(bundle);
-        if (sd.ok) { map = sd.map; startCol = sd.x; startRow = sd.y; if (sd.img >= 0) playerImg = sd.img; loadedFacing = sd.facing;
-                     std::printf("[FFSmith] continue: %s @%d,%d\n", map.c_str(), sd.x, sd.y); }
+        bootSave = readSave(bundle);
+        if (bootSave.ok) { map = bootSave.map; startCol = bootSave.x; startRow = bootSave.y; if (bootSave.img >= 0) playerImg = bootSave.img; loadedFacing = bootSave.facing;
+                     std::printf("[FFSmith] continue: %s @%d,%d\n", map.c_str(), bootSave.x, bootSave.y); }
     }
     FfMap m = load_ffmap(bundle + "/maps/" + map + ".ffmap");
     if (!m.valid()) { std::fprintf(stderr, "[FFSmith] failed to load %s/maps/%s.ffmap\n", bundle.c_str(), map.c_str()); return 1; }
@@ -238,8 +257,6 @@ int main(int argc, char** argv) {
     if (playerImg < 0)
         for (const auto& e : m.events) if (e.img > 0) { playerImg = e.img; break; }
 
-    if (saveFlag) { writeSave(bundle, map, startCol, startRow, face < 0 ? 0 : face, playerImg); return 0; }
-
     Host host(cfg);
     if (!host.init()) return 1;
     host.setBundleDir(bundle);
@@ -248,6 +265,12 @@ int main(int argc, char** argv) {
     host.setField(field.get(), fb);
     host.setDebugData(mapList, spriteList);
     host.loadMenuData(bundle);
+    if (loadFlag && bootSave.hasState) {
+        host.setGameParty(bootSave.party); host.setInventory(bootSave.inv); host.setGil(bootSave.gil);
+        std::printf("[FFSmith] restored party(%zu) inv(%zu) gil=%d\n", bootSave.party.size(), bootSave.inv.size(), bootSave.gil);
+    }
+    if (itemTest) { host.selfTestItemUse(); return 0; }
+    if (saveFlag) { writeSave(bundle, map, startCol, startRow, face < 0 ? 0 : face, playerImg, host); return 0; }
     host.debugSelectMap(map);
     host.setMapKey(map);
     if (openMsg >= 0) field->openMessage(openMsg, openCnt > 0 ? openCnt : 1);
@@ -273,14 +296,15 @@ int main(int argc, char** argv) {
 
     // Windowed loop: debug-launcher START loads the chosen map; plus cross-map warps.
     while (host.frame()) {
-        if (host.consumeSaveRequest()) writeSave(bundle, curMap, field->col(), field->row(), field->facing(), playerImg);
+        if (host.consumeSaveRequest()) writeSave(bundle, curMap, field->col(), field->row(), field->facing(), playerImg, host);
         if (host.consumeLoadRequest()) {
             SaveData sd = readSave(bundle);
             if (sd.ok && loadInto(sd.map, sd.x, sd.y, &host)) {
                 host.setMapKey(sd.map); curMap = sd.map;
                 if (sd.img >= 0) { host.setPlayerSprite(sd.img, 0); playerImg = sd.img; }
                 field->setFacing(sd.facing); host.setMode(Host::Mode::Field);
-                std::printf("[FFSmith] loaded %s @%d,%d\n", sd.map.c_str(), sd.x, sd.y);
+                if (sd.hasState) { host.setGameParty(sd.party); host.setInventory(sd.inv); host.setGil(sd.gil); }
+                std::printf("[FFSmith] loaded %s @%d,%d (party %zu, gil %d)\n", sd.map.c_str(), sd.x, sd.y, sd.party.size(), sd.gil);
             }
         }
         Host::DebugStart ds;
