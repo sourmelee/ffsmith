@@ -606,7 +606,8 @@ void Host::doEnemyAttack() {
     if (alive.empty() || enemyActor_ < 0 || enemyActor_ >= (int)enemies_.size()) { btlPhase_ = 4; return; }
     Combatant& e = enemies_[enemyActor_];
     Combatant& v = party_[alive[std::rand() % alive.size()]];
-    int d = std::max(1, e.atk - v.def / 2 + (std::rand() % 5 - 2));
+    int raw = e.atk * 2 + (std::rand() % (std::max(1, e.atk) + 1));
+    int d = std::max(1, raw / 2 - v.def);
     if (v.defending) d = std::max(1, d / 2);
     v.hp = std::max(0, v.hp - d);
     btlMsg_ = e.name + " -> " + v.name + "   " + std::to_string(d) + " dmg";
@@ -632,7 +633,7 @@ void Host::castOn(int targetIsEnemy, int idx) {
     caster.mp = std::max(0, caster.mp - sp.mp);
     if (sp.type == 0) {                                      // damage (INT-scaled)
         Combatant& t = enemies_[idx];
-        int d = std::max(1, sp.power + caster.intl * 2 + (std::rand() % 7 - 3));
+        int d = std::max(1, sp.power + caster.intl * 3 - t.def / 4 + (std::rand() % 9 - 4));
         t.hp = std::max(0, t.hp - d);
         btlMsg_ = caster.name + " casts " + sp.name + "!  " + std::to_string(d) + " dmg";
     } else {                                                // heal (MND-scaled)
@@ -720,7 +721,13 @@ void Host::startBattle(int leadId) {
 }
 
 void Host::updateBattle(const InputState& in) {
-    auto dmg = [](int atk, int def) { return std::max(1, atk - def / 2 + (std::rand() % 5 - 2)); };
+    // physical damage = decoded core of BattleClass::CalcPhysicAttackDmg: an attack-power
+    // term + random spread (engine Rand), minus full defense (not def/2).  Exact constants +
+    // crit/element/race/status/hit-count modifiers need the full BTLACT struct map (M6 cont.).
+    auto dmg = [](int atk, int def) {
+        int raw = atk * 2 + (std::rand() % (std::max(1, atk) + 1));   // power + spread
+        return std::max(1, raw / 2 - def);                            // defense subtracts
+    };
     auto prevLivingEnemy = [&](int from) {
         for (int i = from - 1; i >= 0; --i) if (enemies_[i].hp > 0) return i;
         for (int i = (int)enemies_.size() - 1; i >= 0; --i) if (enemies_[i].hp > 0) return i;
