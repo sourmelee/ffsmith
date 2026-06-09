@@ -142,10 +142,11 @@ int main(int argc, char** argv) {
     int playerImg = -1, playerVar = 0, face = -1, startCol = -1, startRow = -1;
     int openMsg = -1, openCnt = 1;
     bool startTitle = false, openMenuFlag = false;
+    std::string startMapKey = "g0_p0_m500";   // New Game opening map (placeholder; --start-map to override)
     bool debugMode = false, dbgNoclip = false, dbgOverlay = false, dbgHud = false;
     int menuPageFlag = 0, battleMon = -1, battleSim = -1;
     bool spellTest = false, saveFlag = false, loadFlag = false, itemTest = false, equipTest = false;
-    int animTick = 0; bool dmgTest = false, noOverhead = false, levelTest = false, reviveTest = false;
+    int animTick = 0; bool dmgTest = false, noOverhead = false, levelTest = false, reviveTest = false, menuTest = false;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
         if      (!std::strcmp(a, "--bundle")) bundle = takeStr(argc, argv, i, "");
@@ -159,6 +160,7 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--open-msg")) openMsg = takeInt(argc, argv, i, openMsg);
         else if (!std::strcmp(a, "--open-cnt")) openCnt = takeInt(argc, argv, i, openCnt);
         else if (!std::strcmp(a, "--title")) startTitle = true;
+        else if (!std::strcmp(a, "--start-map")) startMapKey = takeStr(argc, argv, i, startMapKey.c_str());
         else if (!std::strcmp(a, "--menu"))  openMenuFlag = true;
         else if (!std::strcmp(a, "--menupage")) menuPageFlag = takeInt(argc, argv, i, 0);
         else if (!std::strcmp(a, "--battle")) battleMon = takeInt(argc, argv, i, 1);
@@ -170,6 +172,7 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--dmgtest")) dmgTest = true;
         else if (!std::strcmp(a, "--leveltest")) levelTest = true;
         else if (!std::strcmp(a, "--revivetest")) reviveTest = true;
+        else if (!std::strcmp(a, "--menutest")) menuTest = true;
         else if (!std::strcmp(a, "--no-overhead")) noOverhead = true;
         else if (!std::strcmp(a, "--save")) saveFlag = true;
         else if (!std::strcmp(a, "--load")) loadFlag = true;
@@ -288,11 +291,12 @@ int main(int argc, char** argv) {
     if (dmgTest) { host.selfTestDamage(); return 0; }
     if (levelTest) { host.selfTestLevel(); return 0; }
     if (reviveTest) { host.selfTestRevive(); return 0; }
+    if (menuTest) { host.selfTestMenu(); return 0; }
     if (saveFlag) { writeSave(bundle, map, startCol, startRow, face < 0 ? 0 : face, playerImg, host); return 0; }
     host.debugSelectMap(map);
     host.setMapKey(map);
     if (openMsg >= 0) field->openMessage(openMsg, openCnt > 0 ? openCnt : 1);
-    if (startTitle) { host.loadTitle(bundle); host.setMode(Host::Mode::Title); }
+    if (startTitle) { host.loadTitle(bundle); host.setStartMap(startMapKey); host.setHasSave(readSave(bundle).ok); host.setMode(Host::Mode::Title); }
     if (openMenuFlag) host.openMenu();
     if (menuPageFlag > 0) host.openMenuPage(menuPageFlag);
     host.setViewFlags(dbgOverlay, dbgHud);
@@ -310,8 +314,11 @@ int main(int argc, char** argv) {
         return ok ? 0 : 1;
     }
 
-    // Interactive default: boot into the debug launcher (unless --title was given).
-    if (!startTitle) host.setMode(Host::Mode::Debug);
+    // Interactive default: boot into the main menu (Title). --debug jumps straight to the launcher.
+    host.loadTitle(bundle);
+    host.setStartMap(startMapKey);
+    host.setHasSave(readSave(bundle).ok);          // enable Continue only if a save exists
+    host.setMode(debugMode ? Host::Mode::Debug : Host::Mode::Title);
 
     // Windowed loop: debug-launcher START loads the chosen map; plus cross-map warps.
     while (host.frame()) {
@@ -328,7 +335,9 @@ int main(int argc, char** argv) {
         }
         Host::DebugStart ds;
         if (host.consumeDebugStart(ds) && !ds.map.empty() && loadInto(ds.map, ds.x, ds.y, &host)) {
-            host.setPlayerSprite(ds.img, 0);
+            int dimg = ds.img;
+            if (dimg < 0) for (const auto& e : m.events) if (e.img > 0) { dimg = e.img; break; }
+            host.setPlayerSprite(dimg, 0);
             host.setMapKey(ds.map);
             field->setNoClip(ds.noclip);
             field->setFacing(ds.facing);

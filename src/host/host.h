@@ -48,6 +48,8 @@ public:
     void checkFieldHazard();   // damage floors -> persistent party HP
     std::string awardBattleRewards();   // victory: EXP/gil + level-ups into the persistent party
     void setAnimTick(int t) { animTimer_ = t; }
+    void setStartMap(const std::string& m) { startMap_ = m; }
+    void setHasSave(bool b) { hasSave_ = b; }
     void selfTestDamage();   // headless: walk onto a damage floor, report party HP
     void setBundleDir(const std::string& d) { bundleDir_ = d; }
     void setPlayerSprite(int img, int var) { playerImg_ = img; playerVar_ = var; }
@@ -65,6 +67,7 @@ public:
     void selfTestEquip();        // headless: swap a weapon, report stat + inventory change
     void selfTestLevel();        // headless: award EXP, report level-up + HP growth
     void selfTestRevive();       // headless: KO a member, use Phoenix Down
+    void selfTestMenu();         // headless: exercise the title menu dispatch
     const std::vector<GameMember>& gameParty() const { return gameParty_; }
     void setGameParty(std::vector<GameMember> p) { gameParty_ = std::move(p); }
     const std::vector<InvSlot>& inventory() const { return inventory_; }
@@ -154,6 +157,9 @@ private:
     bool          menuOpen_ = false;
     int           menuCursor_ = 0;
     int           blink_ = 0;
+    int           titleSel_ = 0;
+    std::string   startMap_;
+    bool          hasSave_ = false;
     SDL_Texture*  titleTex_ = nullptr;
     int           titleW_ = 0, titleH_ = 0;
     std::vector<std::string> dbgMaps_;

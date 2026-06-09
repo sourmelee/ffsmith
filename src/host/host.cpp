@@ -344,7 +344,20 @@ void Host::update(double /*dt*/) {
         updateBattle(input_);
     } else if (mode_ == Mode::Title) {
         ++blink_;
-        if (input_.pressed & (BTN_CONFIRM | BTN_MENU)) { mode_ = Mode::Debug; blink_ = 0; }
+        const int n = 3;
+        if (input_.pressed & BTN_UP)   titleSel_ = (titleSel_ + n - 1) % n;
+        if (input_.pressed & BTN_DOWN) titleSel_ = (titleSel_ + 1) % n;
+        if (input_.pressed & BTN_CONFIRM) {
+            if (titleSel_ == 0) {                                    // New Game
+                newGame();
+                if (!startMap_.empty()) { debugSelectMap(startMap_); dbgSprIdx_ = -1; dbgX_ = -1; dbgY_ = -1; dbgFacing_ = 0; dbgNoclip_ = false; dbgStart_ = true; }
+            } else if (titleSel_ == 1) {                            // Continue
+                if (hasSave_) loadReq_ = true;
+            } else {                                                // Debug Menu
+                mode_ = Mode::Debug;
+            }
+            blink_ = 0;
+        }
     } else if (menuOpen_) {
         updateMenu(input_);
     } else if (field_) {
@@ -569,9 +582,15 @@ void Host::renderTitle() {
     } else {
         drawText(vw / 2 - 28, vh / 6, "FFSmith", 20, 255, 255, 255);
     }
-    if (((blink_ / 32) & 1) == 0 && fcw_ > 0) {
-        const char* p = "PRESS  START";
-        drawText(vw / 2 - 12 * fcw_ / 2, vh * 3 / 4, p, 40, 235, 235, 255);
+    static const char* ITEMS[3] = { "New Game", "Continue", "Debug Menu" };
+    int by = vh * 5 / 8;
+    for (int i = 0; i < 3; ++i) {
+        bool sel = (i == titleSel_), disabled = (i == 1 && !hasSave_);
+        int ty = by + i * (fch_ + 7);
+        int tx = vw / 2 - 5 * fcw_;
+        if (sel && ((blink_ / 16) & 1) == 0) drawText(tx - fcw_ * 2, ty, ">", 2, 255, 240, 120);
+        int r = disabled ? 110 : (sel ? 255 : 215), g = disabled ? 110 : 235, b = disabled ? 120 : (sel ? 150 : 255);
+        drawText(tx, ty, ITEMS[i], 20, r, g, b);
     }
 }
 
@@ -958,6 +977,17 @@ void Host::selfTestLevel() {
     awardBattleRewards();
     std::printf("[leveltest] -> %s  L%d  exp%d  HP%d/%d  gil%d\n",
                 chars_[gm.charIdx].name.c_str(), gm.level, gm.exp, gm.hp, memberMaxHp(0), gil_);
+}
+
+void Host::selfTestMenu() {
+    setStartMap("g0_p0_m500"); hasSave_ = true;
+    mode_ = Mode::Title; titleSel_ = 0; input_ = InputState{}; input_.pressed = BTN_CONFIRM; update(0.0);
+    DebugStart ds; bool got = consumeDebugStart(ds);
+    std::printf("[menutest] New Game -> start map=%s, party reset to %zu members\n", got ? ds.map.c_str() : "<none>", gameParty_.size());
+    mode_ = Mode::Title; titleSel_ = 1; loadReq_ = false; input_ = InputState{}; input_.pressed = BTN_CONFIRM; update(0.0);
+    std::printf("[menutest] Continue -> loadReq=%d (hasSave=%d)\n", (int)consumeLoadRequest(), (int)hasSave_);
+    mode_ = Mode::Title; titleSel_ = 2; input_ = InputState{}; input_.pressed = BTN_CONFIRM; update(0.0);
+    std::printf("[menutest] Debug Menu -> mode is Debug? %d\n", (int)(mode_ == Mode::Debug));
 }
 
 void Host::selfTestRevive() {
