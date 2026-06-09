@@ -697,6 +697,7 @@ bool Host::loadMenuData(const std::string& dir) {
     chars_ = load_chars(dir + "/data/chars.bin");
     monsters_ = load_monsters(dir + "/data/monsters.bin");
     spells_ = load_spells(dir + "/data/spells.bin");
+    levels_ = load_levels(dir + "/data/levels.bin");
     Texture bg = load_tex(dir + "/ui/btlbg.tex");
     if (bg.valid() && renderer_) {
         if (btlbgTex_) SDL_DestroyTexture(btlbgTex_);
@@ -887,11 +888,15 @@ void Host::beginNextTurn() {
 int Host::memberMaxHp(int i) const {
     if (i < 0 || i >= (int)gameParty_.size()) return 1;
     int ci = gameParty_[i].charIdx;
+    int lvl = gameParty_[i].level > 0 ? gameParty_[i].level : (ci >= 0 && ci < (int)chars_.size() ? chars_[ci].level : 1);
+    if (levels_.valid()) return std::max(1, levels_.maxHp(lvl));
     return (ci >= 0 && ci < (int)chars_.size() && chars_[ci].hp > 0) ? chars_[ci].hp : 30;
 }
 int Host::memberMaxMp(int i) const {
     if (i < 0 || i >= (int)gameParty_.size()) return 0;
     int ci = gameParty_[i].charIdx;
+    int lvl = gameParty_[i].level > 0 ? gameParty_[i].level : (ci >= 0 && ci < (int)chars_.size() ? chars_[ci].level : 1);
+    if (levels_.valid()) return std::max(0, levels_.maxMp(lvl));
     return (ci >= 0 && ci < (int)chars_.size()) ? chars_[ci].mp : 0;
 }
 
@@ -901,10 +906,38 @@ void Host::newGame() {
     for (int i = 0; i < n; ++i) {
         GameMember m; m.charIdx = i; m.hp = chars_[i].hp > 0 ? chars_[i].hp : 30; m.mp = chars_[i].mp;
         for (int k = 0; k < 6; ++k) m.equip[k] = chars_[i].equip[k];   // starting gear from chara_set
+        m.level = chars_[i].level > 0 ? chars_[i].level : 1;
+        m.exp = levels_.valid() ? (int)levels_.expForLevel(m.level) : 0;   // start EXP = threshold for the level
         gameParty_.push_back(m);
     }
-    inventory_ = { {420, 5}, {21, 1}, {22, 1}, {295, 1}, {237, 1}, {215, 1}, {408, 1} };  // Potions + spare gear (Broadsword/Iron Sword/Leather Armor/Iron Helm/Leather Shield/Power Wrist)
+    inventory_ = { {420, 5}, {426, 2}, {21, 1}, {22, 1}, {295, 1}, {237, 1}, {215, 1}, {408, 1} };  // Potions + Phoenix Down + spare gear
     gil_ = 500;
+}
+
+std::string Host::awardBattleRewards() {
+    if (rewardsGiven_) return "Victory!";
+    rewardsGiven_ = true;
+    long totExp = 0, totGil = 0;
+    for (const auto& e : enemies_) { totExp += e.exp; totGil += e.gil; }
+    gil_ = (int)std::min<long>(9999999, (long)gil_ + totGil);
+    std::string msg = "Win!  +" + std::to_string(totExp) + " EXP  +" + std::to_string(totGil) + " G";
+    std::string ups;
+    for (auto& gm : gameParty_) {
+        if (gm.hp <= 0) continue;                                   // KO'd members earn nothing
+        gm.exp = (int)std::min<long>(9999999, (long)gm.exp + totExp);
+        int newLvl = levels_.valid() ? levels_.levelFromExp(gm.exp) : gm.level;
+        if (newLvl > gm.level) {
+            int oldHp = levels_.maxHp(gm.level), oldMp = levels_.maxMp(gm.level);
+            gm.level = newLvl;
+            gm.hp += std::max(0, levels_.maxHp(newLvl) - oldHp);     // gain the HP/MP delta
+            gm.mp += std::max(0, levels_.maxMp(newLvl) - oldMp);
+            if (gm.charIdx >= 0 && gm.charIdx < (int)chars_.size())
+                ups += (ups.empty() ? "" : ", ") + chars_[gm.charIdx].name + " L" + std::to_string(newLvl);
+        }
+    }
+    if (!ups.empty()) msg += "   LEVEL UP: " + ups;
+    std::printf("[FFSmith] %s\n", msg.c_str());
+    return msg;
 }
 
 void Host::endBattle() {                                    // persist battle HP/MP back to the party
@@ -913,6 +946,30 @@ void Host::endBattle() {                                    // persist battle HP
         gameParty_[i].mp = std::max(0, party_[i].mp);
     }
     mode_ = Mode::Field;
+}
+
+void Host::selfTestLevel() {
+    if (gameParty_.empty()) newGame();
+    GameMember& gm = gameParty_[0];
+    std::printf("[leveltest] %s  L%d  exp%d  HP%d/%d  gil%d\n",
+                chars_[gm.charIdx].name.c_str(), gm.level, gm.exp, gm.hp, memberMaxHp(0), gil_);
+    enemies_.clear(); rewardsGiven_ = false;                       // synthetic enemy worth a couple levels
+    Combatant e; e.exp = (long)levels_.expForLevel(gm.level + 2) - gm.exp + 5; e.gil = 120; enemies_.push_back(e);
+    awardBattleRewards();
+    std::printf("[leveltest] -> %s  L%d  exp%d  HP%d/%d  gil%d\n",
+                chars_[gm.charIdx].name.c_str(), gm.level, gm.exp, gm.hp, memberMaxHp(0), gil_);
+}
+
+void Host::selfTestRevive() {
+    if (gameParty_.empty()) newGame();
+    GameMember& gm = gameParty_[1];
+    gm.hp = 0;
+    std::printf("[revivetest] %s KO'd (hp 0)\n", chars_[gm.charIdx].name.c_str());
+    int idx = -1; for (int i = 0; i < (int)inventory_.size(); ++i) if (inventory_[i].id == 426) { idx = i; break; }
+    if (idx < 0) { std::printf("[revivetest] no Phoenix Down in bag\n"); return; }
+    useItem(idx);
+    std::printf("[revivetest] %s HP now %d/%d   msg=\"%s\"\n",
+                chars_[gm.charIdx].name.c_str(), gm.hp, memberMaxHp(1), menuMsg_.c_str());
 }
 
 void Host::selfTestEquip() {
@@ -1013,6 +1070,15 @@ void Host::useItem(int invIdx) {
     bool consumable = (itm.type == 0);                   // item_type 0 = consumable/key item
     if (!consumable) { menuMsg_ = "Can't use that here."; return; }
     const std::string& d = itm.desc;
+    if (d.find("Knocked Out") != std::string::npos) {           // revive item (Phoenix Down)
+        int tgt = -1; for (int i = 0; i < (int)gameParty_.size(); ++i) if (gameParty_[i].hp <= 0) { tgt = i; break; }
+        if (tgt < 0) { menuMsg_ = "No KO'd ally."; return; }
+        gameParty_[tgt].hp = std::max(1, memberMaxHp(tgt) / 4);
+        menuMsg_ = chars_[gameParty_[tgt].charIdx].name + " revived!";
+        if (--slot.count <= 0) { inventory_.erase(inventory_.begin() + invIdx);
+                                 if (pageCursor_ >= (int)inventory_.size()) pageCursor_ = std::max(0, (int)inventory_.size() - 1); }
+        return;
+    }
     int amt = 0; { size_t i = 0; while (i < d.size() && !std::isdigit((unsigned char)d[i])) ++i;
                    while (i < d.size() && std::isdigit((unsigned char)d[i])) amt = amt * 10 + (d[i++] - '0'); }
     bool mp = (d.find("MP") != std::string::npos && d.find("HP") == std::string::npos);
@@ -1034,7 +1100,7 @@ void Host::useItem(int invIdx) {
 }
 
 void Host::startBattle(int leadId) {
-    enemies_.clear();
+    enemies_.clear(); rewardsGiven_ = false;
     const Monster* lead = nullptr;
     if (leadId >= 0) for (const auto& m : monsters_) if (m.id == leadId) { lead = &m; break; }
     if (!lead && !monsters_.empty()) {                       // random encounter -> a weak-ish lead
@@ -1050,6 +1116,7 @@ void Host::startBattle(int leadId) {
         e.wpn = 5 + m->level;             // W = small innate weapon power (no equipment)
         e.def = std::max(1, m->def);      // D (BTLACT 0x58)
         e.level = m->level; e.spd = 7;
+        e.exp = m->exp; e.gil = m->gil;
         enemies_.push_back(e);
     };
     push(lead);
@@ -1163,7 +1230,7 @@ void Host::updateBattle(const InputState& in) {
         }
     } else if (btlPhase_ == 1) {                             // resolve player action
         if (in.pressed & BTN_CONFIRM) {
-            if (!enemiesAlive()) { btlMsg_ = "Victory!"; btlPhase_ = 3; return; }
+            if (!enemiesAlive()) { btlMsg_ = awardBattleRewards(); btlPhase_ = 3; return; }
             beginNextTurn();
         }
     } else if (btlPhase_ == 2) {                             // resolve enemy action
@@ -1260,7 +1327,7 @@ int Host::simBattle(int monsterId) {
                 (partyAlive() && !enemiesAlive()) ? "VICTORY" : "DEFEAT", guard, (int)partyAlive(), (int)enemiesAlive());
     std::printf("  [sim] persistent party:");
     for (size_t i = 0; i < gameParty_.size(); ++i)
-        std::printf(" %s=%d/%d", chars_[gameParty_[i].charIdx].name.c_str(), gameParty_[i].hp, memberMaxHp((int)i));
+        std::printf(" %s=%d/%d(L%d,%dxp)", chars_[gameParty_[i].charIdx].name.c_str(), gameParty_[i].hp, memberMaxHp((int)i), gameParty_[i].level, gameParty_[i].exp);
     std::printf("\n");
     return partyAlive() ? 1 : 0;
 }

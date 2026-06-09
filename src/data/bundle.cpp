@@ -246,6 +246,7 @@ std::vector<Monster> load_monsters(const std::string& path) {
         m.name.assign((const char*)&buf[o], nl); o += nl;
         if (o + 7 > buf.size()) break;
         m.hp = rd_u16(&buf[o]); m.atk = rd_u16(&buf[o + 2]); m.def = rd_u16(&buf[o + 4]); m.level = buf[o + 6]; o += 7;
+        if (o + 8 <= buf.size()) { m.exp = rd_u32(&buf[o]); m.gil = rd_u32(&buf[o + 4]); o += 8; }
         out.push_back(std::move(m));
     }
     return out;
@@ -298,6 +299,18 @@ std::unordered_map<int, std::unordered_map<int, int>> load_chipfloor(const std::
         }
     }
     return out;
+}
+
+LevelTable load_levels(const std::string& path) {
+    LevelTable t; auto buf = read_file(path);
+    if (buf.size() < 6 || std::memcmp(buf.data(), "FLVL", 4) != 0) return t;
+    size_t o = 4;
+    int nt = rd_u16(&buf[o]); o += 2;
+    for (int i = 0; i < nt && o + 4 <= buf.size(); ++i) { t.thr.push_back(rd_u32(&buf[o])); o += 4; }
+    if (o + 2 > buf.size()) return t;
+    int ng = rd_u16(&buf[o]); o += 2;
+    for (int i = 0; i < ng && o + 4 <= buf.size(); ++i) { t.hp.push_back(rd_u16(&buf[o])); t.mp.push_back(rd_u16(&buf[o + 2])); o += 4; }
+    return t;
 }
 
 }  // namespace ffsmith

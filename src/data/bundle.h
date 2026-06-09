@@ -57,8 +57,19 @@ struct CharRec { int id = 0; std::string name; int equip[6] = {0,0,0,0,0,0};
                  int job = 0, level = 1, str = 0, spd = 0, vit = 0, intl = 0, mnd = 0, hp = 0, mp = 0; };
 std::vector<Item>    load_items(const std::string& path);   // data/items.bin
 std::vector<CharRec> load_chars(const std::string& path);   // data/chars.bin
-struct Monster { int id = 0; std::string name; int hp = 0, atk = 0, def = 0, level = 1; };
+struct Monster { int id = 0; std::string name; int hp = 0, atk = 0, def = 0, level = 1; long exp = 0, gil = 0; };
 std::vector<Monster> load_monsters(const std::string& path);  // data/monsters.bin
+
+struct LevelTable {                              // data/levels.bin (EXP thresholds + HP/MP growth)
+    std::vector<uint32_t> thr;                   // thr[i] = cumulative EXP to reach level i+1
+    std::vector<int> hp, mp;                     // per-level max HP / MP (index = level)
+    bool valid() const { return !hp.empty(); }
+    int levelFromExp(long e) const { int L = 0; for (uint32_t t : thr) { if (e >= (long)t) ++L; else break; } return L; }
+    int maxHp(int L) const { if (hp.empty()) return 30; if (L < 0) L = 0; if (L >= (int)hp.size()) L = (int)hp.size()-1; return hp[L]; }
+    int maxMp(int L) const { if (mp.empty()) return 0;  if (L < 0) L = 0; if (L >= (int)mp.size()) L = (int)mp.size()-1; return mp[L]; }
+    long expForLevel(int L) const { return (L >= 1 && L-1 < (int)thr.size()) ? (long)thr[L-1] : 0; }
+};
+LevelTable load_levels(const std::string& path);
 struct Spell { int id = 0, type = 0, mp = 0, power = 0; std::string name; };  // type 0=dmg,1=heal
 std::vector<Spell> load_spells(const std::string& path);  // data/spells.bin
 

@@ -15,8 +15,8 @@ namespace ffsmith {
 
 class Field;
 
-struct Combatant { std::string name; int hp = 0, maxhp = 0, atk = 0, def = 0; bool defending = false; int spd = 8, atb = 0, mp = 0, maxmp = 0, intl = 0, mnd = 0, wpn = 4, level = 1; };
-struct GameMember { int charIdx = -1; int hp = 0, mp = 0; int equip[6] = {0,0,0,0,0,0}; };   // persistent party (current HP/MP + equipment)
+struct Combatant { std::string name; int hp = 0, maxhp = 0, atk = 0, def = 0; bool defending = false; int spd = 8, atb = 0, mp = 0, maxmp = 0, intl = 0, mnd = 0, wpn = 4, level = 1; long exp = 0, gil = 0; };
+struct GameMember { int charIdx = -1; int hp = 0, mp = 0; int equip[6] = {0,0,0,0,0,0}; int level = 0, exp = 0; };   // persistent party (HP/MP + equip + level/exp)
 struct InvSlot    { int id = 0, count = 0; };
 
 struct HostConfig {
@@ -46,6 +46,7 @@ public:
     void setOverhead(const Texture& img);   // layers 1+ drawn above sprites (z-order)
     void loadChipAnim(const std::string& bundleDir);
     void checkFieldHazard();   // damage floors -> persistent party HP
+    std::string awardBattleRewards();   // victory: EXP/gil + level-ups into the persistent party
     void setAnimTick(int t) { animTimer_ = t; }
     void selfTestDamage();   // headless: walk onto a damage floor, report party HP
     void setBundleDir(const std::string& d) { bundleDir_ = d; }
@@ -62,6 +63,8 @@ public:
     void newGame();
     void selfTestItemUse();      // headless: damage a member, use a Potion, report
     void selfTestEquip();        // headless: swap a weapon, report stat + inventory change
+    void selfTestLevel();        // headless: award EXP, report level-up + HP growth
+    void selfTestRevive();       // headless: KO a member, use Phoenix Down
     const std::vector<GameMember>& gameParty() const { return gameParty_; }
     void setGameParty(std::vector<GameMember> p) { gameParty_ = std::move(p); }
     const std::vector<InvSlot>& inventory() const { return inventory_; }
@@ -136,6 +139,8 @@ private:
     std::unordered_set<int> damageCells_;   // cell indices that hurt the party
     int lastCell_ = -1;
     SDL_Texture* overhead_tex_ = nullptr;
+    LevelTable levels_;
+    bool rewardsGiven_ = false;
     struct AnimCell { int idx, mc, var, baseInner, type, frames, speed; };
     std::vector<AnimCell> animCells_;
     bool animDirty_ = true;
