@@ -314,4 +314,20 @@ LevelTable load_levels(const std::string& path) {
     return t;
 }
 
+std::unordered_map<int, SpriteGeo> load_spritegeo(const std::string& path) {
+    std::unordered_map<int, SpriteGeo> out;
+    auto buf = read_file(path);
+    if (buf.size() < 6 || std::memcmp(buf.data(), "FSGE", 4) != 0) return out;
+    int n = rd_u16(&buf[4]); size_t o = 6;
+    for (int i = 0; i < n && o + 15 <= buf.size(); ++i) {
+        int img = rd_u16(&buf[o]); SpriteGeo g;
+        g.isObject = buf[o + 2];
+        g.fx = rd_i16(&buf[o + 3]); g.fy = rd_i16(&buf[o + 5]);
+        g.fw = rd_u16(&buf[o + 7]); g.fh = rd_u16(&buf[o + 9]);
+        g.px = rd_i16(&buf[o + 11]); g.py = rd_i16(&buf[o + 13]);
+        o += 15; out[img] = g;
+    }
+    return out;
+}
+
 }  // namespace ffsmith

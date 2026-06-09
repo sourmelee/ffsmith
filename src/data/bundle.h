@@ -70,6 +70,9 @@ struct LevelTable {                              // data/levels.bin (EXP thresho
     long expForLevel(int L) const { return (L >= 1 && L-1 < (int)thr.size()) ? (long)thr[L-1] : 0; }
 };
 LevelTable load_levels(const std::string& path);
+
+struct SpriteGeo { int isObject = 0, fx = 0, fy = 0, fw = 0, fh = 0, px = 0, py = 0; };  // field_anm per-sprite frame + anchor
+std::unordered_map<int, SpriteGeo> load_spritegeo(const std::string& path);
 struct Spell { int id = 0, type = 0, mp = 0, power = 0; std::string name; };  // type 0=dmg,1=heal
 std::vector<Spell> load_spells(const std::string& path);  // data/spells.bin
 

@@ -146,6 +146,7 @@ private:
     int lastCell_ = -1;
     SDL_Texture* overhead_tex_ = nullptr;
     LevelTable levels_;
+    std::unordered_map<int, SpriteGeo> spriteGeo_;
     bool rewardsGiven_ = false;
     struct AnimCell { int idx, mc, var, baseInner, type, frames, speed; };
     std::vector<AnimCell> animCells_;

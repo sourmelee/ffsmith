@@ -222,6 +222,14 @@ bool Host::drawSprite(int img, int var, int facing, int animCol, int lx, int ly,
     int tw = 0, th = 0;
     SDL_Texture* tex = spriteTex(img, var, tw, th);
     if (!tex) return false;
+    auto git = spriteGeo_.find(img);                    // object sprites (doors/crystals/chests): real frame + anchor
+    if (git != spriteGeo_.end() && git->second.isObject && git->second.fw > 0) {
+        const SpriteGeo& g = git->second;
+        SDL_Rect osrc{ g.fx, g.fy, g.fw, g.fh };
+        SDL_Rect odst{ lx + tile / 2 + g.px, ly + tile + g.py, g.fw, g.fh };
+        SDL_RenderCopy(renderer_, tex, &osrc, &odst);
+        return true;
+    }
     int sx = 0, sy = 0, cw = 48, ch = 48;
     SDL_RendererFlip flip = SDL_FLIP_NONE;
     if (tw >= 149 && th >= 149) {
@@ -789,6 +797,7 @@ bool Host::loadMenuData(const std::string& dir) {
     monsters_ = load_monsters(dir + "/data/monsters.bin");
     spells_ = load_spells(dir + "/data/spells.bin");
     levels_ = load_levels(dir + "/data/levels.bin");
+    spriteGeo_ = load_spritegeo(dir + "/data/spritegeo.bin");
     Texture bg = load_tex(dir + "/ui/btlbg.tex");
     if (bg.valid() && renderer_) {
         if (btlbgTex_) SDL_DestroyTexture(btlbgTex_);
