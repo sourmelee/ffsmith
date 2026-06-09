@@ -146,7 +146,7 @@ int main(int argc, char** argv) {
     bool debugMode = false, dbgNoclip = false, dbgOverlay = false, dbgHud = false;
     int menuPageFlag = 0, battleMon = -1, battleSim = -1;
     bool spellTest = false, saveFlag = false, loadFlag = false, itemTest = false, equipTest = false;
-    int animTick = 0; bool dmgTest = false, noOverhead = false, levelTest = false, reviveTest = false, menuTest = false;
+    int animTick = 0; bool dmgTest = false, noOverhead = false, levelTest = false, reviveTest = false, menuTest = false; int introBeat = -1;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
         if      (!std::strcmp(a, "--bundle")) bundle = takeStr(argc, argv, i, "");
@@ -173,6 +173,7 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--leveltest")) levelTest = true;
         else if (!std::strcmp(a, "--revivetest")) reviveTest = true;
         else if (!std::strcmp(a, "--menutest")) menuTest = true;
+        else if (!std::strcmp(a, "--intro")) introBeat = takeInt(argc, argv, i, 0);
         else if (!std::strcmp(a, "--no-overhead")) noOverhead = true;
         else if (!std::strcmp(a, "--save")) saveFlag = true;
         else if (!std::strcmp(a, "--load")) loadFlag = true;
@@ -307,6 +308,7 @@ int main(int argc, char** argv) {
     if (battleSim >= 0) { host.simBattle(battleSim); return 0; }
 
     if (animTick > 0) host.setAnimTick(animTick);
+    if (introBeat >= 0) { host.loadTitle(bundle); host.loadIntro(bundle); host.setIntroState(introBeat); host.setMode(Host::Mode::Intro); }
     if (!fieldshot.empty()) {
         if (face >= 0) { InputState in; in.held = (uint32_t)(face==0?BTN_DOWN:face==1?BTN_UP:face==2?BTN_LEFT:BTN_RIGHT); field->update(in); }
         bool ok = host.shotField(fieldshot);
@@ -316,6 +318,7 @@ int main(int argc, char** argv) {
 
     // Interactive default: boot into the main menu (Title). --debug jumps straight to the launcher.
     host.loadTitle(bundle);
+    host.loadIntro(bundle);
     host.setStartMap(startMapKey);
     host.setHasSave(readSave(bundle).ok);          // enable Continue only if a save exists
     host.setMode(debugMode ? Host::Mode::Debug : Host::Mode::Title);

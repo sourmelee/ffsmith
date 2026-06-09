@@ -229,6 +229,7 @@ std::vector<CharRec> load_chars(const std::string& path) {
             c.str = rd_u16(&buf[o]); c.spd = rd_u16(&buf[o + 2]); c.vit = rd_u16(&buf[o + 4]);
             c.intl = rd_u16(&buf[o + 6]); c.mnd = rd_u16(&buf[o + 8]); o += 10;
             if (o + 4 <= buf.size()) { c.hp = rd_u16(&buf[o]); c.mp = rd_u16(&buf[o + 2]); o += 4; }
+            if (o + 2 <= buf.size()) { c.chpk = rd_u16(&buf[o]); o += 2; }   // CHPK field-sprite id
         }
         out.push_back(std::move(c));
     }

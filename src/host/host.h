@@ -35,7 +35,7 @@ public:
     Host(const Host&)            = delete;
     Host& operator=(const Host&) = delete;
 
-    enum class Mode { Debug, Title, Field, Battle };
+    enum class Mode { Debug, Title, Field, Battle, Intro };
     struct DebugStart { std::string map; int img = -1, x = 0, y = 0, facing = 0; bool noclip = false; };
 
     bool init();
@@ -50,6 +50,8 @@ public:
     void setAnimTick(int t) { animTimer_ = t; }
     void setStartMap(const std::string& m) { startMap_ = m; }
     void setHasSave(bool b) { hasSave_ = b; }
+    void setIntroState(int n) { introState_ = n; }
+    void loadIntro(const std::string& dir);
     void selfTestDamage();   // headless: walk onto a damage floor, report party HP
     void setBundleDir(const std::string& d) { bundleDir_ = d; }
     void setPlayerSprite(int img, int var) { playerImg_ = img; playerVar_ = var; }
@@ -98,6 +100,7 @@ private:
     bool drawSprite(int img, int var, int facing, int animCol, int lx, int ly, int tile);
     void updateMenu(const InputState& in);
     void renderTitle();
+    void renderIntro();
     void renderMenu(int vw, int vh);
     void renderItemPage(int px, int py, int pw, int ph);
     void renderCharPage(int px, int py, int pw, int ph, bool status);
@@ -160,6 +163,8 @@ private:
     int           titleSel_ = 0;
     std::string   startMap_;
     bool          hasSave_ = false;
+    int           introState_ = 0;
+    std::string   introProl_, introChap_;
     SDL_Texture*  titleTex_ = nullptr;
     int           titleW_ = 0, titleH_ = 0;
     std::vector<std::string> dbgMaps_;

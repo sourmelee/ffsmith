@@ -348,15 +348,28 @@ void Host::update(double /*dt*/) {
         if (input_.pressed & BTN_UP)   titleSel_ = (titleSel_ + n - 1) % n;
         if (input_.pressed & BTN_DOWN) titleSel_ = (titleSel_ + 1) % n;
         if (input_.pressed & BTN_CONFIRM) {
-            if (titleSel_ == 0) {                                    // New Game
-                newGame();
-                if (!startMap_.empty()) { debugSelectMap(startMap_); dbgSprIdx_ = -1; dbgX_ = -1; dbgY_ = -1; dbgFacing_ = 0; dbgNoclip_ = false; dbgStart_ = true; }
+            if (titleSel_ == 0) {                                    // New Game -> intro cinematics
+                newGame(); introState_ = 0; mode_ = Mode::Intro;
             } else if (titleSel_ == 1) {                            // Continue
                 if (hasSave_) loadReq_ = true;
             } else {                                                // Debug Menu
                 mode_ = Mode::Debug;
             }
             blink_ = 0;
+        }
+    } else if (mode_ == Mode::Intro) {
+        ++blink_;
+        if (input_.pressed & (BTN_CONFIRM | BTN_MENU)) {
+            ++introState_; blink_ = 0;
+            if (introState_ >= 3 && !startMap_.empty()) {           // intro done -> load the opening field
+                debugSelectMap(startMap_);
+                int heroImg = 13;     // lead's field sprite (Sol = chpk 13); from chars.bin when baked
+                if (!gameParty_.empty() && gameParty_[0].charIdx >= 0 && gameParty_[0].charIdx < (int)chars_.size() && chars_[gameParty_[0].charIdx].chpk > 0)
+                    heroImg = chars_[gameParty_[0].charIdx].chpk;
+                dbgSprIdx_ = 0;
+                for (int i = 0; i < (int)dbgSprites_.size(); ++i) if (dbgSprites_[i] == heroImg) { dbgSprIdx_ = i; break; }
+                dbgX_ = -1; dbgY_ = -1; dbgFacing_ = 0; dbgNoclip_ = false; dbgStart_ = true;
+            }
         }
     } else if (menuOpen_) {
         updateMenu(input_);
@@ -421,6 +434,7 @@ void Host::render() {
     if (mode_ == Mode::Debug) { renderDebug(); SDL_RenderPresent(renderer_); return; }
     if (mode_ == Mode::Battle) { renderBattle(); SDL_RenderPresent(renderer_); return; }
     if (mode_ == Mode::Title) { renderTitle(); SDL_RenderPresent(renderer_); return; }
+    if (mode_ == Mode::Intro) { renderIntro(); SDL_RenderPresent(renderer_); return; }
     if (field_ && map_tex_) {
         int winW = 0, winH = 0;
         SDL_GetWindowSize(window_, &winW, &winH);
@@ -564,6 +578,64 @@ bool Host::loadTitle(const std::string& bundleDir) {
     return titleTex_ != nullptr;
 }
 
+void Host::loadIntro(const std::string& dir) {
+    introProl_.clear(); introChap_ = "Prologue";
+    FILE* f = std::fopen((dir + "/data/intro.bin").c_str(), "rb");
+    if (!f) return;
+    char mag[4] = {0,0,0,0};
+    bool ok = (std::fread(mag, 1, 4, f) == 4) && mag[0] == 'F' && mag[1] == 'I' && mag[2] == 'N' && mag[3] == 'T';
+    if (ok) {
+        uint16_t n = 0;
+        if (std::fread(&n, 2, 1, f) == 1 && n > 0) {
+            std::string str(n, 0);
+            std::fread(&str[0], 1, n, f);
+            introProl_ = str;
+        }
+        if (std::fread(&n, 2, 1, f) == 1 && n > 0) {
+            std::string str(n, 0);
+            std::fread(&str[0], 1, n, f);
+            introChap_ = str;
+        }
+    }
+    std::fclose(f);
+}
+
+void Host::renderIntro() {
+    int winW = 0, winH = 0; SDL_GetWindowSize(window_, &winW, &winH);
+    const int sc = cfg_.scale < 1 ? 1 : cfg_.scale;
+    int vw = winW / sc, vh = winH / sc; if (vw < 16) vw = 16; if (vh < 16) vh = 16;
+    SDL_RenderSetScale(renderer_, (float)sc, (float)sc);
+    int st = introState_ < 0 ? 0 : (introState_ > 2 ? 2 : introState_);
+    if (st == 0) {                                              // prologue text crawl
+        SDL_SetRenderDrawColor(renderer_, 18, 24, 150, 255); SDL_RenderClear(renderer_);
+        int y = vh / 4; size_t i = 0;
+        while (i <= introProl_.size()) {
+            size_t nl = introProl_.find('\n', i);
+            std::string line = introProl_.substr(i, nl == std::string::npos ? std::string::npos : nl - i);
+            int lx = vw / 2 - (int)line.size() * fcw_ / 2;
+            drawText(lx, y, line, 120, 238, 238, 248);
+            y += fch_ + 5;
+            if (nl == std::string::npos) break;
+            i = nl + 1;
+        }
+        if (((blink_ / 24) & 1) == 0) drawText(vw / 2 - 3 * fcw_, vh - fch_ * 3, "[Z]", 6, 200, 210, 255);
+    } else if (st == 1) {                                       // FF logo card
+        SDL_SetRenderDrawColor(renderer_, 245, 244, 236, 255); SDL_RenderClear(renderer_);
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+        if (titleTex_ && titleW_ > 0) {
+            double s = std::min((double)vw * 0.72 / titleW_, (double)vh * 0.40 / titleH_); if (s <= 0) s = 1.0;
+            int dw = (int)(titleW_ * s), dh = (int)(titleH_ * s);
+            SDL_Rect dst{ (vw - dw) / 2, (vh - dh) / 2, dw, dh }; SDL_RenderCopy(renderer_, titleTex_, nullptr, &dst);
+        }
+    } else {                                                    // "Prologue" chapter card
+        SDL_SetRenderDrawColor(renderer_, 245, 244, 236, 255); SDL_RenderClear(renderer_);
+        int lx = vw / 2 - (int)introChap_.size() * fcw_ / 2;
+        drawText(lx, vh / 2 - fch_, introChap_, 40, 60, 50, 45);
+        SDL_SetRenderDrawColor(renderer_, 150, 140, 120, 255);
+        SDL_Rect fl{ vw / 2 - 40, vh / 2 + fch_, 80, 2 }; SDL_RenderFillRect(renderer_, &fl);
+    }
+}
+
 void Host::renderTitle() {
     int winW = 0, winH = 0; SDL_GetWindowSize(window_, &winW, &winH);
     const int sc = cfg_.scale < 1 ? 1 : cfg_.scale;
@@ -590,7 +662,7 @@ void Host::renderTitle() {
         int tx = vw / 2 - 5 * fcw_;
         if (sel && ((blink_ / 16) & 1) == 0) drawText(tx - fcw_ * 2, ty, ">", 2, 255, 240, 120);
         int r = disabled ? 110 : (sel ? 255 : 215), g = disabled ? 110 : 235, b = disabled ? 120 : (sel ? 150 : 255);
-        drawText(tx, ty, ITEMS[i], 20, r, g, b);
+        drawText(tx, ty, ITEMS[i], 20, (uint8_t)r, (uint8_t)g, (uint8_t)b);
     }
 }
 
@@ -752,6 +824,8 @@ bool Host::consumeDebugStart(DebugStart& out) {
 }
 
 void Host::updateDebug(const InputState& in) {
+    if (dbgMapIdx_ < 0) dbgMapIdx_ = 0;
+    if (dbgSprIdx_ < 0) dbgSprIdx_ = 0;
     const int N = 10;
     if (in.pressed & BTN_UP)   dbgRow_ = (dbgRow_ + N - 1) % N;
     if (in.pressed & BTN_DOWN) dbgRow_ = (dbgRow_ + 1) % N;
@@ -784,8 +858,10 @@ void Host::renderDebug() {
     SDL_RenderClear(renderer_);
     SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
     static const char* fac[4] = {"Down", "Up", "Left", "Right"};
-    std::string mapName = (dbgMapIdx_ < (int)dbgMaps_.size()) ? dbgMaps_[dbgMapIdx_] : std::string("(no maps)");
-    int sprId = (dbgSprIdx_ < (int)dbgSprites_.size()) ? dbgSprites_[dbgSprIdx_] : -1;
+    if (dbgMapIdx_ < 0) dbgMapIdx_ = 0;
+    if (dbgSprIdx_ < 0) dbgSprIdx_ = 0;
+    std::string mapName = (dbgMapIdx_ >= 0 && dbgMapIdx_ < (int)dbgMaps_.size()) ? dbgMaps_[dbgMapIdx_] : std::string("(no maps)");
+    int sprId = (dbgSprIdx_ >= 0 && dbgSprIdx_ < (int)dbgSprites_.size()) ? dbgSprites_[dbgSprIdx_] : -1;
     std::string rows[10] = {
         "Map:       < " + mapName + " >   (" + std::to_string(dbgMapIdx_ + 1) + "/" + std::to_string(dbgMaps_.size()) + ")",
         "Character: < fldchr" + std::to_string(sprId) + " >",
@@ -981,9 +1057,11 @@ void Host::selfTestLevel() {
 
 void Host::selfTestMenu() {
     setStartMap("g0_p0_m500"); hasSave_ = true;
-    mode_ = Mode::Title; titleSel_ = 0; input_ = InputState{}; input_.pressed = BTN_CONFIRM; update(0.0);
+    mode_ = Mode::Title; titleSel_ = 0; input_ = InputState{}; input_.pressed = BTN_CONFIRM; update(0.0);   // -> Intro
+    bool inIntro = (mode_ == Mode::Intro);
+    for (int k = 0; k < 3; ++k) { input_ = InputState{}; input_.pressed = BTN_CONFIRM; update(0.0); }          // advance the 3 intro beats
     DebugStart ds; bool got = consumeDebugStart(ds);
-    std::printf("[menutest] New Game -> start map=%s, party reset to %zu members\n", got ? ds.map.c_str() : "<none>", gameParty_.size());
+    std::printf("[menutest] New Game -> Intro=%d, after 3 beats start map=%s, party reset to %zu members\n", (int)inIntro, got ? ds.map.c_str() : "<none>", gameParty_.size());
     mode_ = Mode::Title; titleSel_ = 1; loadReq_ = false; input_ = InputState{}; input_.pressed = BTN_CONFIRM; update(0.0);
     std::printf("[menutest] Continue -> loadReq=%d (hasSave=%d)\n", (int)consumeLoadRequest(), (int)hasSave_);
     mode_ = Mode::Title; titleSel_ = 2; input_ = InputState{}; input_.pressed = BTN_CONFIRM; update(0.0);
@@ -1400,4 +1478,4 @@ int Host::run() {
     return 0;
 }
 
-}  // namespace ffsmith
+}  // namesp
