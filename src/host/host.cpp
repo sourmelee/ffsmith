@@ -182,8 +182,28 @@ void Host::setOverhead(const Texture& img) {
 void Host::setField(Field* f, const Texture& mapImg) {
     if (!ensureMapTexture(mapImg)) return;
     field_ = f;
+    if (field_) {
+        if (!vmEnv_.rand) wireScriptEnv();
+        field_->setScript(&scriptState_, &vmEnv_);
+    }
     animDirty_ = true;
     SDL_RenderSetLogicalSize(renderer_, 0, 0);
+}
+
+// VM environment hooks: item ownership / party membership / RNG
+// (FieldClass::GetReferenceItem / GetReferenceParty / GameClass::Rand).
+void Host::wireScriptEnv() {
+    vmEnv_.itemCount = [this](int id) {
+        for (const auto& s : inventory_) if (s.id == id) return s.count;
+        return 0;
+    };
+    vmEnv_.partyHas = [this](int memberId) {
+        for (const auto& gm : gameParty_)
+            if (gm.charIdx >= 0 && gm.charIdx < (int)chars_.size()
+                && chars_[gm.charIdx].id == memberId) return true;
+        return false;
+    };
+    vmEnv_.rand = [](int n) { return n > 0 ? (int)(std::rand() % n) : 0; };
 }
 
 SDL_Texture* Host::spriteTex(int img, int var, int& w, int& h) {
@@ -391,7 +411,8 @@ void Host::update(double /*dt*/) {
                     heroImg = chars_[gameParty_[0].charIdx].chpk;
                 dbgSprIdx_ = 0;
                 for (int i = 0; i < (int)dbgSprites_.size(); ++i) if (dbgSprites_[i] == heroImg) { dbgSprIdx_ = i; break; }
-                dbgX_ = -1; dbgY_ = -1; dbgFacing_ = 0; dbgNoclip_ = false; dbgStart_ = true;
+                dbgX_ = startX_; dbgY_ = startY_;   // real New Game spawn (boot scenario 0)
+                dbgFacing_ = 0; dbgNoclip_ = false; dbgStart_ = true;
             }
         }
     } else if (menuOpen_) {
@@ -503,6 +524,7 @@ void Host::render() {
 
         // NPC sprites (or faint marker for script-only triggers)
         for (const auto& e : field_->map()->events) {
+            if (!field_->appears(e)) continue;   // CheckEventAppear gate
             int lx = offX + e.x * tile - camX, ly = offY + e.y * tile - camY;
             if (e.img > 0) {
                 if (!drawSprite(e.img, e.var, FACE_DOWN, 0, lx, ly, tile)) {
@@ -564,12 +586,28 @@ void Host::render() {
             SDL_Rect box{ bx, by, bw, boxH }; SDL_RenderFillRect(renderer_, &box);
             SDL_SetRenderDrawColor(renderer_, 235, 235, 255, 255);
             SDL_RenderDrawRect(renderer_, &box);
-            const int id = field_->dialogueMsg();
-            auto it = messages_.find(id);
-            std::string txt = (it != messages_.end()) ? it->second
-                                                       : ("[msg " + std::to_string(id) + "]");
             const int maxChars = fcw_ > 0 ? (bw - 12) / fcw_ : 30;
-            drawText(bx + 6, by + 6, txt, maxChars, 255, 255, 255);
+            if (field_->choiceActive()) {
+                // 0x3c choice menu: each option value is a message id (the choice line)
+                const auto& opts = field_->choiceOptions();
+                int yy = by + 6;
+                for (size_t k = 0; k < opts.size() && yy < by + boxH - fch_; ++k) {
+                    auto it = messages_.find(opts[k].first);
+                    std::string line = (it != messages_.end()) ? it->second
+                                       : ("Option " + std::to_string(k + 1));
+                    for (auto& c : line) if (c == '\n') c = ' ';
+                    bool sel = ((int)k == field_->choiceSel());
+                    drawText(bx + 6, yy, (sel ? "> " : "  ") + line, maxChars,
+                             sel ? 255 : 170, sel ? 240 : 170, sel ? 120 : 170);
+                    yy += fch_ + 2;
+                }
+            } else {
+                const int id = field_->dialogueMsg();
+                auto it = messages_.find(id);
+                std::string txt = (it != messages_.end()) ? it->second
+                                                           : ("[msg " + std::to_string(id) + "]");
+                drawText(bx + 6, by + 6, txt, maxChars, 255, 255, 255);
+            }
         }
         if (menuOpen_) renderMenu(vw, vh);
         SDL_RenderPresent(renderer_);
@@ -1081,7 +1119,8 @@ void Host::selfTestLevel() {
 }
 
 void Host::selfTestMenu() {
-    setStartMap("g0_p0_m500"); hasSave_ = true;
+    if (startMap_.empty()) setStartMap("g0_p0_m500");
+    hasSave_ = true;
     mode_ = Mode::Title; titleSel_ = 0; input_ = InputState{}; input_.pressed = BTN_CONFIRM; update(0.0);   // -> Intro
     bool inIntro = (mode_ == Mode::Intro);
     for (int k = 0; k < 3; ++k) { input_ = InputState{}; input_.pressed = BTN_CONFIRM; update(0.0); }          // advance the 3 intro beats

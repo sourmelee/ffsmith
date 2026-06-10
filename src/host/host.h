@@ -7,6 +7,7 @@
 #include "host/input.h"
 #include "data/bundle.h"
 #include "audio/audio.h"
+#include "field/script_state.h"
 
 struct SDL_Window;
 struct SDL_Renderer;
@@ -50,6 +51,7 @@ public:
     std::string awardBattleRewards();   // victory: EXP/gil + level-ups into the persistent party
     void setAnimTick(int t) { animTimer_ = t; }
     void setStartMap(const std::string& m) { startMap_ = m; }
+    void setStartPos(int x, int y) { startX_ = x; startY_ = y; }   // New Game spawn (start.bin)
     void setHasSave(bool b) { hasSave_ = b; }
     void setIntroState(int n) { introState_ = n; }
     void loadIntro(const std::string& dir);
@@ -77,6 +79,10 @@ public:
     void setInventory(std::vector<InvSlot> v) { inventory_ = std::move(v); }
     int  gil() const { return gil_; }
     void setGil(int g) { gil_ = g; }
+    ScriptState&       scriptState()       { return scriptState_; }
+    const ScriptState& scriptState() const { return scriptState_; }
+    const VMEnv& vmEnv() const { return vmEnv_; }
+    void wireScriptEnv();        // build vmEnv_ hooks (items / party / RNG)
     int  simBattle(int monsterId);   // headless: auto-attack to the end (verification)
     void debugOpenMagic();           // debug: open the Magic spell menu for a screenshot
     bool loadTitle(const std::string& bundleDir);   // ui/title.tex
@@ -191,6 +197,9 @@ private:
     std::vector<Combatant> party_;
     int btlPhase_ = 0, btlCmd_ = 0, btlMember_ = 0;
     std::vector<GameMember> gameParty_;
+    ScriptState scriptState_;      // script flags/vars (event VM; saved in FSAV v5)
+    int startX_ = -1, startY_ = -1;
+    VMEnv vmEnv_;
     std::string menuMsg_;          // transient item-use feedback
     int equipSlot_ = 0, equipSub_ = 0, equipPick_ = 0;   // equip page: slot cursor / submenu / candidate cursor
     std::vector<int> equipCand_;   // inventory indices that fit the selected slot

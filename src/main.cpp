@@ -52,11 +52,14 @@ static void printUsage(const char* exe) {
 
 static void dump_events(const FfMap& m, int tile) {
     std::printf("[FFSmith] map events: %zu\n", m.events.size());
+    ScriptState st;                       // throwaway state for the dump
+    VMEnv env; env.rand = [](int n) { return n > 0 ? 0 : 0; };
     for (size_t i = 0; i < m.events.size(); ++i) {
         const Event& e = m.events[i];
-        std::printf("  ev[%zu] (%2d,%2d) type=%d boot=0x%02x img=%d/%d scripts=%zu\n",
-                    i, e.x, e.y, e.type, e.boot, e.img, e.var, e.scripts.size());
-        VMOut o = run_event(e);
+        std::printf("  ev[%zu] (%2d,%2d) type=%d boot=0x%02x img=%d/%d scripts=%zu appear=%d\n",
+                    i, e.x, e.y, e.type, e.boot, e.img, e.var, e.scripts.size(),
+                    (int)check_event_appear(e.appear, st, env));
+        VMOut o = run_event(e, st, env);
         for (const auto& l : o.log) std::printf("       . %s\n", l.c_str());
         if (!o.messages.empty()) { std::printf("       => messages:"); for (int id : o.messages) std::printf(" %d", id); std::printf("\n"); }
     }
@@ -78,14 +81,105 @@ static void dump_events(const FfMap& m, int tile) {
     }
 }
 
+
+// --- VM self-test (no SDL): branching, flags/vars, appear, save blob ---------
+static std::vector<uint8_t> hexblk(const char* hx) {
+    std::vector<uint8_t> v;
+    for (const char* p = hx; p[0] && p[1]; p += 2) {
+        auto nib = [](char c) { return c <= '9' ? c - '0' : (c | 32) - 'a' + 10; };
+        v.push_back((uint8_t)((nib(p[0]) << 4) | nib(p[1])));
+    }
+    return v;
+}
+
+static int vmSelfTest() {
+    int fails = 0;
+    auto expect = [&](bool ok, const char* what) {
+        std::printf("[vmtest] %-44s %s\n", what, ok ? "PASS" : "FAIL");
+        if (!ok) ++fails;
+    };
+    VMEnv env; env.rand = [](int n) { return n > 0 ? 0 : 0; };
+    // Event A: set flag1[0], if flag1[0]==1 fallthrough -> msg 100, end; else -> msg 200
+    Event ev;
+    ev.scripts.push_back(hexblk("0400000100000001"));            // flag[1][0] set
+    // ScriptIf: left=flag(type1,idx0) right=imm 1 op== -> target blk 4 on FAIL
+    ev.scripts.push_back(hexblk("3d0000010000000100000000000a000000000000000100000004"));
+    ev.scripts.push_back(hexblk("000064000000000000"));          // msg 100
+    ev.scripts.push_back(hexblk("57"));                          // end
+    ev.scripts.push_back(hexblk("0000c8000000000000"));          // msg 200 (FAIL branch)
+    {
+        ScriptState st;
+        VMOut o = run_event(ev, st, env);
+        expect(st.getFlag(1, 0) == 1, "0x04 sets flag bank1 bit0");
+        expect(o.messages.size() == 1 && o.messages[0] == 100, "ScriptIf TRUE falls through (msg 100)");
+        expect(o.sawEnd, "ScriptEnd reached");
+    }
+    {
+        ScriptState st;                       // flag clear -> condition fails -> jump
+        VMOut o = run_event(ev, st, env, 1);  // skip the flag-set block
+        expect(o.messages.size() == 1 && o.messages[0] == 200, "ScriptIf FALSE jumps (msg 200)");
+    }
+    {
+        ScriptState st;                       // 0x3f jump skips msg
+        Event ej; ej.scripts.push_back(hexblk("3f0002"));
+        ej.scripts.push_back(hexblk("000064000000000000"));
+        ej.scripts.push_back(hexblk("57"));
+        VMOut o = run_event(ej, st, env);
+        expect(o.messages.empty() && o.sawEnd, "0x3f jumps over a block");
+    }
+    {
+        ScriptState st;                       // var write + warp idiom (0x6b + 0x66)
+        Event ew;
+        ew.scripts.push_back(hexblk("6b0205" "0000" "000001f4" "0001" "00000000" "0002" "00000025" "0003" "0000001c" "0004" "00000001"));
+        ew.scripts.push_back(hexblk("66010001040000"));
+        ew.scripts.push_back(hexblk("57"));
+        VMOut o = run_event(ew, st, env);
+        expect(o.warpMap == 500 && o.warpX == 0x25 && o.warpY == 0x1c && o.warpDir == 1,
+               "0x6b/0x66 warp -> map 500 @(37,28)");
+        expect(st.getVar(2, 0) == 500, "script var bank persists");
+    }
+    {
+        ScriptState st;                       // SetReferenceVariable: storyState = imm 11
+        Event ec; ec.scripts.push_back(hexblk("030900" "0005" "0003" "0000" "0000" "0007" "0000000b"));
+        ec.scripts.push_back(hexblk("57"));
+        run_event(ec, st, env);
+        expect(st.storyState == 11, "0x03 var[5][3] = imm 11 (story state)");
+    }
+    {
+        // appear conditions: the m501 dual-door pair (flag5 bit10 clear/set)
+        std::vector<uint8_t> apClear = hexblk("0105000a000000000000000000000000000000000000000000000000000000");
+        std::vector<uint8_t> apSet   = hexblk("0105000a010000000000000000000000000000000000000000000000000000");
+        ScriptState st;
+        expect(check_event_appear(apClear, st, env) && !check_event_appear(apSet, st, env),
+               "appear: flag5[10] clear -> door A only");
+        st.setFlag(5, 10, 1);
+        expect(!check_event_appear(apClear, st, env) && check_event_appear(apSet, st, env),
+               "appear: flag5[10] set -> door B only");
+    }
+    {
+        ScriptState st;                       // save blob round-trip
+        st.setFlag(5, 10, 1); st.setVar(2, 7, 12345); st.storyState = 11; st.page = 2;
+        st.setVar(1, 3, 777);                 // paged alias into v2
+        auto blob = st.serialize();
+        ScriptState st2;
+        bool ok = st2.deserialize(blob.data(), blob.size());
+        expect(ok && st2.getFlag(5, 10) == 1 && st2.getVar(2, 7) == 12345
+               && st2.storyState == 11 && st2.page == 2 && st2.getVar(1, 3) == 777,
+               "script-state save blob round-trip");
+    }
+    std::printf("[vmtest] %s (%d failure%s)\n", fails ? "FAILED" : "ALL PASS", fails, fails == 1 ? "" : "s");
+    return fails ? 1 : 0;
+}
+
 struct SaveData { bool ok = false; std::string map; int x = 0, y = 0, facing = 0, img = -1;
-                  bool hasState = false; std::vector<GameMember> party; std::vector<InvSlot> inv; int gil = 0; };
+                  bool hasState = false; std::vector<GameMember> party; std::vector<InvSlot> inv; int gil = 0;
+                  std::vector<uint8_t> script; };
 
 static bool writeSave(const std::string& bundle, const std::string& mk, int x, int y, int facing, int img, const Host& host) {
     FILE* f = std::fopen((bundle + "/save.dat").c_str(), "wb");
     if (!f) return false;
     std::fwrite("FSAV", 1, 4, f);
-    uint8_t ver = 4; std::fwrite(&ver, 1, 1, f);
+    uint8_t ver = 5; std::fwrite(&ver, 1, 1, f);
     uint16_t mlen = (uint16_t)mk.size(); std::fwrite(&mlen, 2, 1, f); std::fwrite(mk.data(), 1, mk.size(), f);
     uint16_t ux = (uint16_t)x, uy = (uint16_t)y; std::fwrite(&ux, 2, 1, f); std::fwrite(&uy, 2, 1, f);
     uint8_t uf = (uint8_t)facing; std::fwrite(&uf, 1, 1, f);
@@ -100,6 +194,10 @@ static bool writeSave(const std::string& bundle, const std::string& mk, int x, i
     uint16_t ic = (uint16_t)inv.size(); std::fwrite(&ic, 2, 1, f);
     for (const auto& sl : inv) { int32_t v[2] = { sl.id, sl.count }; std::fwrite(v, 4, 2, f); }
     int32_t gil = host.gil(); std::fwrite(&gil, 4, 1, f);
+    // v5: script flags/vars (event-VM state)
+    auto blob = host.scriptState().serialize();
+    uint32_t bl = (uint32_t)blob.size(); std::fwrite(&bl, 4, 1, f);
+    std::fwrite(blob.data(), 1, blob.size(), f);
     std::fclose(f);
     std::printf("[FFSmith] saved -> %s/save.dat (%s @%d,%d face %d img %d; party %u, inv %u, gil %d)\n",
                 bundle.c_str(), mk.c_str(), x, y, facing, img, (unsigned)pc, (unsigned)ic, gil);
@@ -128,6 +226,13 @@ static SaveData readSave(const std::string& bundle) {
         uint16_t ic = 0; std::fread(&ic, 2, 1, f);
         for (int i = 0; i < ic; ++i) { int32_t v[2] = {0,0}; std::fread(v, 4, 2, f); InvSlot sl; sl.id = v[0]; sl.count = v[1]; sd.inv.push_back(sl); }
         int32_t gil = 0; std::fread(&gil, 4, 1, f); sd.gil = gil; sd.hasState = true;
+        if (ver >= 5) {
+            uint32_t bl = 0;
+            if (std::fread(&bl, 4, 1, f) == 1 && bl > 0 && bl < (1u << 20)) {
+                sd.script.resize(bl);
+                if (std::fread(sd.script.data(), 1, bl, f) != bl) sd.script.clear();
+            }
+        }
     }
     std::fclose(f);
     return sd;
@@ -142,7 +247,8 @@ int main(int argc, char** argv) {
     int playerImg = -1, playerVar = 0, face = -1, startCol = -1, startRow = -1;
     int openMsg = -1, openCnt = 1;
     bool startTitle = false, openMenuFlag = false;
-    std::string startMapKey = "g0_p0_m500";   // New Game opening map (placeholder; --start-map to override)
+    std::vector<std::string> setFlags;        // --setflag T,I  (debug: set script flag before run)
+    std::string startMapKey;                   // New Game opening map (data/start.bin; --start-map overrides)
     bool debugMode = false, dbgNoclip = false, dbgOverlay = false, dbgHud = false;
     int menuPageFlag = 0, battleMon = -1, battleSim = -1;
     bool spellTest = false, saveFlag = false, loadFlag = false, itemTest = false, equipTest = false;
@@ -173,6 +279,8 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--leveltest")) levelTest = true;
         else if (!std::strcmp(a, "--revivetest")) reviveTest = true;
         else if (!std::strcmp(a, "--menutest")) menuTest = true;
+        else if (!std::strcmp(a, "--vmtest")) return vmSelfTest();
+        else if (!std::strcmp(a, "--setflag")) setFlags.push_back(takeStr(argc, argv, i, ""));
         else if (!std::strcmp(a, "--intro")) introBeat = takeInt(argc, argv, i, 0);
         else if (!std::strcmp(a, "--no-overhead")) noOverhead = true;
         else if (!std::strcmp(a, "--save")) saveFlag = true;
@@ -248,6 +356,17 @@ int main(int argc, char** argv) {
 
     if (!walk.empty()) {
         if (dbgNoclip) field->setNoClip(true);
+        // headless trace still needs script state (appear conditions, flags, vars)
+        static ScriptState walkState;
+        static VMEnv walkEnv; walkEnv.rand = [](int n) { return n > 0 ? (int)(std::rand() % n) : 0; };
+        for (const auto& sf : setFlags) {
+            int t = 0, ix = 0;
+            if (std::sscanf(sf.c_str(), "%d,%d", &t, &ix) == 2) {
+                walkState.setFlag(t, ix, 1);
+                std::printf("[FFSmith] debug: flag[%d][%d] set\n", t, ix);
+            }
+        }
+        field->setScript(&walkState, &walkEnv);
         std::printf("[FFSmith] walk trace from (%d,%d) on %dx%d map:\n", startCol, startRow, m.w, m.h);
         for (char ch : walk) {
             int btn = dirBtnFromChar(ch); if (!btn) continue;
@@ -275,17 +394,39 @@ int main(int argc, char** argv) {
         for (const auto& e : m.events) if (e.img > 0) { playerImg = e.img; break; }
 
     Host host(cfg);
+    // Real New Game start point: boot_data scenario record 0 (GameClass::LoadScenarioData).
+    int startX = -1, startY = -1;
+    {
+        auto starts = load_start(bundle + "/data/start.bin");
+        if (!starts.empty() && starts[0].valid() && startMapKey.empty()) {
+            std::string k = find_map_key(bundle, starts[0].map);
+            if (!k.empty()) { startMapKey = k; startX = starts[0].x; startY = starts[0].y;
+                std::printf("[FFSmith] New Game start: scenario 0 -> %s @(%d,%d)\n", k.c_str(), startX, startY); }
+        }
+        if (startMapKey.empty()) startMapKey = "g0_p0_m500";   // fallback (no start.bin)
+    }
     if (!host.init()) return 1;
     host.setBundleDir(bundle);
     host.setPlayerSprite(playerImg, playerVar);
     host.loadText(bundle, bankOf(map));
     host.setField(field.get(), fb);
+    host.setStartMap(startMapKey);
+    host.setStartPos(startX, startY);
+    for (const auto& sf : setFlags) {
+        int t = 0, ix = 0;
+        if (std::sscanf(sf.c_str(), "%d,%d", &t, &ix) == 2) {
+            host.scriptState().setFlag(t, ix, 1);
+            std::printf("[FFSmith] debug: flag[%d][%d] set\n", t, ix);
+        }
+    }
     if (!noOverhead) host.setOverhead(overheadFb);
     host.setDebugData(mapList, spriteList);
     host.loadMenuData(bundle);
     if (loadFlag && bootSave.hasState) {
         host.setGameParty(bootSave.party); host.setInventory(bootSave.inv); host.setGil(bootSave.gil);
-        std::printf("[FFSmith] restored party(%zu) inv(%zu) gil=%d\n", bootSave.party.size(), bootSave.inv.size(), bootSave.gil);
+        if (!bootSave.script.empty()) host.scriptState().deserialize(bootSave.script.data(), bootSave.script.size());
+        std::printf("[FFSmith] restored party(%zu) inv(%zu) gil=%d script(%zu)\n",
+                    bootSave.party.size(), bootSave.inv.size(), bootSave.gil, bootSave.script.size());
     }
     if (itemTest) { host.selfTestItemUse(); return 0; }
     if (equipTest) { host.selfTestEquip(); return 0; }
@@ -297,7 +438,7 @@ int main(int argc, char** argv) {
     host.debugSelectMap(map);
     host.setMapKey(map);
     if (openMsg >= 0) field->openMessage(openMsg, openCnt > 0 ? openCnt : 1);
-    if (startTitle) { host.loadTitle(bundle); host.setStartMap(startMapKey); host.setHasSave(readSave(bundle).ok); host.setMode(Host::Mode::Title); }
+    if (startTitle) { host.loadTitle(bundle); host.setStartMap(startMapKey); host.setStartPos(startX, startY); host.setHasSave(readSave(bundle).ok); host.setMode(Host::Mode::Title); }
     if (openMenuFlag) host.openMenu();
     if (menuPageFlag > 0) host.openMenuPage(menuPageFlag);
     host.setViewFlags(dbgOverlay, dbgHud);
@@ -320,6 +461,7 @@ int main(int argc, char** argv) {
     host.loadTitle(bundle);
     host.loadIntro(bundle);
     host.setStartMap(startMapKey);
+    host.setStartPos(startX, startY);
     host.setHasSave(readSave(bundle).ok);          // enable Continue only if a save exists
     host.setMode(debugMode ? Host::Mode::Debug : Host::Mode::Title);
 
@@ -332,7 +474,8 @@ int main(int argc, char** argv) {
                 host.setMapKey(sd.map); curMap = sd.map;
                 if (sd.img >= 0) { host.setPlayerSprite(sd.img, 0); playerImg = sd.img; }
                 field->setFacing(sd.facing); host.setMode(Host::Mode::Field);
-                if (sd.hasState) { host.setGameParty(sd.party); host.setInventory(sd.inv); host.setGil(sd.gil); }
+                if (sd.hasState) { host.setGameParty(sd.party); host.setInventory(sd.inv); host.setGil(sd.gil);
+                                   if (!sd.script.empty()) host.scriptState().deserialize(sd.script.data(), sd.script.size()); }
                 std::printf("[FFSmith] loaded %s @%d,%d (party %zu, gil %d)\n", sd.map.c_str(), sd.x, sd.y, sd.party.size(), sd.gil);
             }
         }

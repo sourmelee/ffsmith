@@ -1,7 +1,10 @@
 #pragma once
 #include <cstdint>
+#include <utility>
 #include <vector>
 #include "data/bundle.h"
+#include "field/event_vm.h"
+#include "field/script_state.h"
 #include "host/input.h"
 
 namespace ffsmith {
@@ -29,10 +32,19 @@ public:
     bool isSolid(int c, int r) const;
     const FfMap* map() const { return map_; }
 
-    // events / dialogue
-    bool inDialogue() const { return dlgActive_; }
+    // script state (flags/vars; owned by Host, shared across maps)
+    void setScript(ScriptState* st, const VMEnv* env) { script_ = st; env_ = env; }
+    ScriptState* script() const { return script_; }
+    bool appears(const Event& e) const;          // CheckEventAppear gate
+
+    // events / dialogue / choices
+    bool inDialogue() const { return dlgActive_ || choiceActive_; }
     int  dialogueMsg() const;
-    void confirm();                              // talk / advance dialogue
+    bool choiceActive() const { return choiceActive_; }
+    const std::vector<std::pair<int, int>>& choiceOptions() const { return choice_.options; }
+    int  choiceSel() const { return choiceSel_; }
+    void confirm();                              // talk / advance dialogue / pick choice
+    void cancel();                               // choice: take the default branch
     Warp consumeWarp() { Warp w = warp_; warp_ = Warp{}; return w; }  // pending cross-map warp
     void setNoClip(bool b) { noClip_ = b; }     // debug: ignore collision
     bool noClip() const { return noClip_; }
@@ -46,6 +58,9 @@ public:
     const Event* stepTriggerAt(int c, int r) const;  // step-on trigger at a tile
 
 private:
+    void runScript(const Event* e, int startBlock);   // run VM + absorb VMOut
+    void choiceMove(int d);
+
     const FfMap* map_;
     int tile_;
     int col_, row_;
@@ -57,9 +72,15 @@ private:
     int speed_ = 2;
     Warp warp_;
     bool noClip_ = false;
+    ScriptState* script_ = nullptr;
+    const VMEnv* env_ = nullptr;
     std::vector<int> dlgQueue_;
     int dlgIdx_ = 0;
     bool dlgActive_ = false;
+    bool choiceActive_ = false;                  // 0x3c pause: pick then resume VM
+    VMChoice choice_;
+    int choiceSel_ = 0;
+    const Event* pendingEv_ = nullptr;           // event awaiting choice resume
 };
 
 }  // namespace ffsmith

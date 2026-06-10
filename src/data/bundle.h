@@ -18,6 +18,7 @@ struct Event {
     int type = 0;              // 0 = chara/NPC, 1 = trigger/auto (header[7])
     int boot = 0;              // boot/appear condition (header[8])
     int img = -1, var = 0;     // chara sprite id + variant
+    std::vector<uint8_t> appear;   // 31-byte appear-condition block (header[9..0x27]; FFM3)
     std::vector<std::vector<uint8_t>> scripts;  // length-split bytecode blocks
 };
 
@@ -77,5 +78,10 @@ struct SpriteGeo { int isObject = 0, fx = 0, fy = 0, fw = 0, fh = 0, px = 0, py 
 std::unordered_map<int, SpriteGeo> load_spritegeo(const std::string& path);
 struct Spell { int id = 0, type = 0, mp = 0, power = 0; std::string name; };  // type 0=dmg,1=heal
 std::vector<Spell> load_spells(const std::string& path);  // data/spells.bin
+
+// data/start.bin (FSTR): New Game start table from boot_data scenario section 1
+// (GameClass::LoadScenarioData).  Record 0 = retail New Game start point.
+struct StartInfo { int map = -1, x = 0, y = 0, story = 0; bool valid() const { return map >= 0; } };
+std::vector<StartInfo> load_start(const std::string& path);
 
 }  // namespace ffsmith

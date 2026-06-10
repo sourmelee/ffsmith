@@ -81,14 +81,16 @@ FfMap load_ffmap(const std::string& path) {
             o += cells;
         }
     }
-    if (buf[3] >= '2' && o + 2 <= buf.size()) {  // FFM2 events block
+    if (buf[3] >= '2' && o + 2 <= buf.size()) {  // FFM2/FFM3 events block
+        const bool hasAppear = (buf[3] >= '3');   // FFM3: +31 appear bytes per event
         int ne = rd_u16(&buf[o]); o += 2;
         for (int e = 0; e < ne; ++e) {
-            if (o + 9 > buf.size()) break;
+            if (o + (hasAppear ? 40u : 9u) > buf.size()) break;
             Event ev;
             ev.x = buf[o]; ev.y = buf[o+1]; ev.type = buf[o+2]; ev.boot = buf[o+3];
-            ev.img = rd_i16(&buf[o+4]); ev.var = buf[o+6];
-            int ns = rd_u16(&buf[o+7]); o += 9;
+            ev.img = rd_i16(&buf[o+4]); ev.var = buf[o+6]; o += 7;
+            if (hasAppear) { ev.appear.assign(buf.begin() + o, buf.begin() + o + 31); o += 31; }
+            int ns = rd_u16(&buf[o]); o += 2;
             for (int s = 0; s < ns; ++s) {
                 if (o + 2 > buf.size()) break;
                 int len = rd_u16(&buf[o]); o += 2;
@@ -268,6 +270,18 @@ std::vector<Spell> load_spells(const std::string& path) {
         if (o + (size_t)nl > buf.size()) break;
         sp.name.assign((const char*)&buf[o], nl); o += nl;
         out.push_back(std::move(sp));
+    }
+    return out;
+}
+
+std::vector<StartInfo> load_start(const std::string& path) {
+    std::vector<StartInfo> out; auto buf = read_file(path);
+    if (buf.size() < 6 || std::memcmp(buf.data(), "FSTR", 4) != 0) return out;
+    int n = rd_u16(&buf[4]); size_t o = 6;
+    for (int i = 0; i < n && o + 5 <= buf.size(); ++i, o += 5) {
+        StartInfo si;
+        si.map = rd_u16(&buf[o]); si.x = buf[o + 2]; si.y = buf[o + 3]; si.story = buf[o + 4];
+        out.push_back(si);
     }
     return out;
 }
