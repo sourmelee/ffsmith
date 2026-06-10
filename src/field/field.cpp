@@ -21,9 +21,18 @@ static int dirFromHeld(uint32_t h) {
 //   0 = auto/parallel-on-load, 1 = action/talk, 2/3/6/7/8 = position (step/range)
 //   triggers.  Doors and map-edge warps are position triggers and can be type 0
 //   (town building doors) OR type 1 (interior exits) -- so we key off boot, not type.
+static bool inRect(const Event& e, int c, int r) {
+    return c >= e.x && c < e.x + e.w && r >= e.y && r < e.y + e.h;
+}
+// Step/range triggers (FieldClass::CheckRangeEvent / CheckStartEvent): boots
+// 6 (range-in on step end), 7 (range-in always), 8 (confirm in range) use the
+// rect; 2/3 are kept as step triggers pending their trigger-type RE.
 static bool isStepTrigger(const Event& e) {
     return !e.scripts.empty() &&
-           (e.boot == 2 || e.boot == 3 || e.boot == 6 || e.boot == 7 || e.boot == 8);
+           (e.boot == 2 || e.boot == 3 || e.boot == 6 || e.boot == 7);
+}
+static bool isParallel(const Event& e) {    // boot 4/5: run whenever appear passes
+    return !e.scripts.empty() && (e.boot == 4 || e.boot == 5);
 }
 static bool isStandingChara(const Event& e) {  // talk/auto NPC: solid, talk on confirm
     return e.img > 0 && (e.boot == 0 || e.boot == 1);
@@ -61,8 +70,62 @@ const Event* Field::npcAt(int c, int r) const {
 // when the player lands on its tile; the script's 0x6b/0x41 supplies the warp dest.
 const Event* Field::stepTriggerAt(int c, int r) const {
     for (const auto& e : map_->events)
-        if (e.x == c && e.y == r && isStepTrigger(e) && appears(e)) return &e;
+        if (inRect(e, c, r) && isStepTrigger(e) && appears(e)) return &e;
     return nullptr;
+}
+
+// --- auto events (map-load cutscenes, parallels) ----------------------------
+int Field::evIndex(const Event* e) const { return (int)(e - map_->events.data()); }
+
+bool Field::canAutoRun(const Event* e) const {
+    int i = evIndex(e);
+    if (i < 0 || i >= (int)map_->events.size()) return false;
+    if (autoBudget_ <= 0) return false;
+    return runCount_.empty() || runCount_[i] < 4;        // per-event loop guard
+}
+
+void Field::queueAuto(const Event* e) {
+    for (const Event* q : autoQueue_) if (q == e) return;
+    autoQueue_.push_back(e);
+}
+
+// On-map-entry autos: parallels (boot 4/5) whose appear passes, boot-0 scripts
+// (ambient setup, provisional: once), and boot-7 range events containing the
+// spawn cell (this is how the m0/m9 prologue cutscenes start).
+void Field::enterMap() {
+    runCount_.assign(map_->events.size(), 0);
+    autoQueue_.clear();
+    autoBudget_ = 32;
+    for (const auto& e : map_->events) {
+        if (e.scripts.empty() || !appears(e)) continue;
+        if (isParallel(e) || e.boot == 0) queueAuto(&e);
+        else if (e.boot == 7 && inRect(e, col_, row_)) queueAuto(&e);
+    }
+    if (!autoQueue_.empty())
+        std::printf("[FFSmith] enterMap: %zu auto event(s) queued\n", autoQueue_.size());
+}
+
+// Re-scan parallels after flag/var writes (UpdateEventAppear): a boot-4/5
+// event becomes eligible the moment its appear conditions pass.
+void Field::rescanParallel() {
+    for (const auto& e : map_->events)
+        if (isParallel(e) && appears(e) && canAutoRun(&e)) queueAuto(&e);
+}
+
+void Field::pumpAuto() {
+    if (dlgActive_ || choiceActive_ || warp_.valid() || autoQueue_.empty()) return;
+    const Event* e = autoQueue_.front();
+    autoQueue_.erase(autoQueue_.begin());
+    if (!appears(*e) || !canAutoRun(e)) return;
+    int i = evIndex(e);
+    if (i >= 0 && i < (int)runCount_.size()) ++runCount_[i];
+    --autoBudget_;
+    std::printf("[FFSmith] auto event ev%d (boot %d) runs\n", i, e->boot);
+    bool wasDirty = script_ ? script_->dirty : false;
+    if (script_) script_->dirty = false;
+    runScript(e, 0);
+    if (script_ && script_->dirty) rescanParallel();
+    else if (script_) script_->dirty = wasDirty;
 }
 
 int Field::dialogueMsg() const {
@@ -82,7 +145,7 @@ void Field::runScript(const Event* e, int startBlock) {
                     e->img, dlgQueue_[dlgIdx_], (int)o.messages.size() - 1);
     }
     if (o.hasChoice) {
-        pendingEv_ = e; choice_ = o.choice; choiceSel_ = 0;
+        pendingEv_ = o.choiceEv ? o.choiceEv : e; choice_ = o.choice; choiceSel_ = 0;
         if (!dlgActive_) choiceActive_ = true;   // else: shown when dialogue drains
     }
     if (o.warpMap >= 0) {
@@ -113,7 +176,14 @@ void Field::confirm() {
     }
     if (moving_) return;
     const Event* e = npcAt(col_ + DX[facing_], row_ + DY[facing_]);
-    if (!e) return;
+    if (!e) {                               // boot 8 = confirm while inside the rect
+        for (const auto& ev : map_->events)
+            if (ev.boot == 8 && !ev.scripts.empty() && inRect(ev, col_, row_) && appears(ev)) {
+                runScript(&ev, 0);
+                return;
+            }
+        return;
+    }
     runScript(e, 0);
 }
 
@@ -132,6 +202,7 @@ void Field::choiceMove(int d) {
 }
 
 void Field::update(const InputState& in) {
+    pumpAuto();                             // run pending auto events when idle
     if (choiceActive_) {                    // choice menu eats input
         if (in.pressed & BTN_UP)    choiceMove(-1);
         if (in.pressed & BTN_DOWN)  choiceMove(1);

@@ -14,7 +14,9 @@ struct Texture {
 
 // A field event: NPC, object, or trigger (from the map chunk's event pack).
 struct Event {
+    int id = 0;                // event id (header u16; CallEvent 0x66 target)
     int x = 0, y = 0;          // tile position
+    int w = 1, h = 1;          // trigger-rect size (CheckRangeEvent; boots 6/7/8)
     int type = 0;              // 0 = chara/NPC, 1 = trigger/auto (header[7])
     int boot = 0;              // boot/appear condition (header[8])
     int img = -1, var = 0;     // chara sprite id + variant
@@ -27,6 +29,7 @@ struct FfMap {
     int mc_slot0 = -1, var_slot0 = 0;
     int mc_slot1 = -1, var_slot1 = 0;
     int overhead_threshold = 0;   // layers with index > this are overhead (FieldClass+0xdc2c)
+    int spawn_x = -1, spawn_y = -1, spawn_dir = 0;  // map default spawn (FFM4; +0xdc48..54)
     int field_bgm = 255;          // ReserveBGM id -> audio/snd0_{id}.wav (255 = none)
     int battle_bgm = 255;         // battle BGM id (255 = none)
     std::vector<std::vector<uint16_t>> layers;

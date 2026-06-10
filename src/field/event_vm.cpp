@@ -16,12 +16,20 @@ static long ind(const ScriptState& st, long raw, int mask, int bit) {
     return ((mask >> bit) & 1) ? st.getVar(2, (int)raw) : raw;
 }
 
+static void run_event_depth(const Event& ev, ScriptState& st, const VMEnv& env,
+                            int startBlock, int depth, VMOut& o);
+
 VMOut run_event(const Event& ev, ScriptState& st, const VMEnv& env, int startBlock) {
     VMOut o;
+    run_event_depth(ev, st, env, startBlock, 0, o);
+    return o;
+}
+
+static void run_event_depth(const Event& ev, ScriptState& st, const VMEnv& env,
+                            int startBlock, int depth, VMOut& o) {
     char tmp[120];
     const int n = (int)ev.scripts.size();
     int pc = startBlock;
-    bool warpAction = false;
     int steps = 0;
 
     while (pc >= 0 && pc < n && ++steps < 2048) {
@@ -30,10 +38,17 @@ VMOut run_event(const Event& ev, ScriptState& st, const VMEnv& env, int startBlo
         if (b.empty()) { pc = next; continue; }
         const int op = b[0];
         switch (op) {
-            case 0x00: {                                     // SetMessage
+            case 0x00:                                       // SetMessage
+            case 0x01: {                                     // ScriptSentence (cinematic text)
                 int id = rdW(b, 1);
                 o.messages.push_back(id);
-                std::snprintf(tmp, sizeof(tmp), "blk%d: SetMessage msg=%d", pc, id);
+                std::snprintf(tmp, sizeof(tmp), "blk%d: %s msg=%d", pc,
+                              op == 0x00 ? "SetMessage" : "ScriptSentence", id);
+                o.log.push_back(tmp);
+                break;
+            }
+            case 0x32: {                                     // wait N frames (placeholder)
+                std::snprintf(tmp, sizeof(tmp), "blk%d: Wait %d (skipped)", pc, rdW(b, 1));
                 o.log.push_back(tmp);
                 break;
             }
@@ -100,10 +115,11 @@ VMOut run_event(const Event& ev, ScriptState& st, const VMEnv& env, int startBlo
                 for (int k = 0; k < cnt && (size_t)(6 + 4 * k) <= b.size(); ++k)
                     o.choice.options.emplace_back(rdW(b, 3 + 4 * k), rdW(b, 5 + 4 * k));
                 o.choice.defaultBlock = pc + 1;
+                o.choiceEv = &ev;
                 o.hasChoice = true;
                 std::snprintf(tmp, sizeof(tmp), "blk%d: choice (%d options)", pc, cnt);
                 o.log.push_back(tmp);
-                return o;                                    // pause for selection
+                return;                                      // pause for selection
             }
             case 0x3d: {                                     // ScriptIf (jump on FAIL)
                 int mask = (b.size() > 1) ? b[1] : 0;
@@ -139,12 +155,12 @@ VMOut run_event(const Event& ev, ScriptState& st, const VMEnv& env, int startBlo
                 o.log.push_back(tmp);
                 break;
             }
-            case 0x41: {                                     // MapChange (direct warp)
+            case 0x41: {                  // MapChange: map, layer, x, y, dir (SetMapChangeSelect)
                 int mask = (b.size() > 1) ? b[1] : 0;
                 o.warpMap = (int)ind(st, rdW(b, 2), mask, 0);
-                o.warpX   = (int)ind(st, rdW(b, 4), mask, 1);
-                o.warpY   = (int)ind(st, rdW(b, 6), mask, 2);
-                o.warpDir = (int)ind(st, rdW(b, 8), mask, 3);
+                o.warpX   = (int)ind(st, rdW(b, 6), mask, 2);
+                o.warpY   = (int)ind(st, rdW(b, 8), mask, 3);
+                o.warpDir = (int)ind(st, rdW(b, 10), mask, 4);
                 std::snprintf(tmp, sizeof(tmp), "blk%d: MapChange -> map %d @(%d,%d) dir %d",
                               pc, o.warpMap, o.warpX, o.warpY, o.warpDir);
                 o.log.push_back(tmp);
@@ -155,10 +171,21 @@ VMOut run_event(const Event& ev, ScriptState& st, const VMEnv& env, int startBlo
                 o.log.push_back("ScriptEnd");
                 pc = n;
                 continue;
-            case 0x66:                                       // SetEntityAction
-                if (b.size() > 4 && b[4] == 0x04) warpAction = true;
-                o.log.push_back("SetEntityAction");
+            case 0x66: {                                     // CallEvent(id, startBlock)
+                int mask = (b.size() > 2) ? b[2] : 0;
+                int id   = (int)ind(st, rdW(b, 3), mask, 0);
+                int line = (int)ind(st, rdW(b, 5), mask, 1);
+                const Event* callee = env.findEvent ? env.findEvent(id) : nullptr;
+                std::snprintf(tmp, sizeof(tmp), "blk%d: CallEvent 0x%x blk%d %s",
+                              pc, id, line, callee ? "" : "(not found)");
+                o.log.push_back(tmp);
+                if (callee && depth < 6)
+                    run_event_depth(*callee, st, env, line, depth + 1, o);
+                else if (callee)
+                    o.log.push_back("CallEvent: depth cap hit");
+                if (o.hasChoice) return;                     // callee paused on a choice
                 break;
+            }
             case 0x6b: {                                     // BulkSetVars
                 if (b.size() >= 3) {
                     int sub = b[1], cnt = b[2];
@@ -182,16 +209,7 @@ VMOut run_event(const Event& ev, ScriptState& st, const VMEnv& env, int startBlo
         }
         pc = next;
     }
-    // 0x6B sub2 vars + 0x66 action 04 = the standard door/edge warp idiom; the
-    // real MoveMap reads the live script-var bank (this+0xe9ac) at action time.
-    if (o.warpMap < 0 && warpAction && st.getVar(2, 0) > 0) {
-        o.warpMap = st.getVar(2, 0); o.warpX = st.getVar(2, 2);
-        o.warpY = st.getVar(2, 3);   o.warpDir = st.getVar(2, 4);
-        std::snprintf(tmp, sizeof(tmp), "Warp(vars) -> map %d @(%d,%d) dir %d",
-                      o.warpMap, o.warpX, o.warpY, o.warpDir);
-        o.log.push_back(tmp);
-    }
-    return o;
+    (void)tmp;
 }
 
 }  // namespace ffsmith

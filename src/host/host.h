@@ -82,7 +82,8 @@ public:
     ScriptState&       scriptState()       { return scriptState_; }
     const ScriptState& scriptState() const { return scriptState_; }
     const VMEnv& vmEnv() const { return vmEnv_; }
-    void wireScriptEnv();        // build vmEnv_ hooks (items / party / RNG)
+    void wireScriptEnv();        // build vmEnv_ hooks (items / party / RNG / CallEvent)
+    void loadCommonEvents(const std::string& bundleDir);   // map 10000 = shared event pool
     int  simBattle(int monsterId);   // headless: auto-attack to the end (verification)
     void debugOpenMagic();           // debug: open the Magic spell menu for a screenshot
     bool loadTitle(const std::string& bundleDir);   // ui/title.tex
@@ -198,6 +199,7 @@ private:
     int btlPhase_ = 0, btlCmd_ = 0, btlMember_ = 0;
     std::vector<GameMember> gameParty_;
     ScriptState scriptState_;      // script flags/vars (event VM; saved in FSAV v5)
+    FfMap commonEvents_;           // map 10000: CallEvent (0x66) routine pool
     int startX_ = -1, startY_ = -1;
     VMEnv vmEnv_;
     std::string menuMsg_;          // transient item-use feedback

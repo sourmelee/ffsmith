@@ -20,6 +20,7 @@ struct VMOut {
     bool sawEnd = false;
     int  warpMap = -1, warpX = 0, warpY = 0, warpDir = -1;
     bool hasChoice = false;          // stopped at a 0x3c — resume via run_event(start)
+    const Event* choiceEv = nullptr; // event owning the choice (may be a 0x66 callee)
     VMChoice choice;
     int  bgm = -1;                   // PlayBGM track (0x35), if any
 };

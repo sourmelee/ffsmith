@@ -45,7 +45,10 @@ public:
     int  choiceSel() const { return choiceSel_; }
     void confirm();                              // talk / advance dialogue / pick choice
     void cancel();                               // choice: take the default branch
-    Warp consumeWarp() { Warp w = warp_; warp_ = Warp{}; return w; }  // pending cross-map warp
+    Warp consumeWarp() {                         // pending cross-map warp; dialogue first
+        if (dlgActive_ || choiceActive_) return Warp{};
+        Warp w = warp_; warp_ = Warp{}; return w;
+    }
     void setNoClip(bool b) { noClip_ = b; }     // debug: ignore collision
     bool noClip() const { return noClip_; }
     void setFacing(int f) { if (f >= 0 && f < 4) facing_ = f; }
@@ -55,11 +58,17 @@ public:
         dlgIdx_ = 0; dlgActive_ = true;
     }
     const Event* npcAt(int c, int r) const;      // talk target at a tile
-    const Event* stepTriggerAt(int c, int r) const;  // step-on trigger at a tile
+    const Event* stepTriggerAt(int c, int r) const;  // step/range trigger at a tile
+    void enterMap();                             // fire on-load autos (boot 4/5/0 + boot-7 rect)
 
 private:
     void runScript(const Event* e, int startBlock);   // run VM + absorb VMOut
     void choiceMove(int d);
+    int  evIndex(const Event* e) const;
+    bool canAutoRun(const Event* e) const;
+    void queueAuto(const Event* e);
+    void pumpAuto();                             // run queued autos when idle
+    void rescanParallel();                       // boot 4/5: run when appear passes
 
     const FfMap* map_;
     int tile_;
@@ -81,6 +90,9 @@ private:
     VMChoice choice_;
     int choiceSel_ = 0;
     const Event* pendingEv_ = nullptr;           // event awaiting choice resume
+    std::vector<const Event*> autoQueue_;        // pending auto-run events
+    std::vector<int> runCount_;                  // per-event auto-run count (loop guard)
+    int autoBudget_ = 32;                        // total auto runs per map visit
 };
 
 }  // namespace ffsmith

@@ -204,6 +204,23 @@ void Host::wireScriptEnv() {
         return false;
     };
     vmEnv_.rand = [](int n) { return n > 0 ? (int)(std::rand() % n) : 0; };
+    vmEnv_.findEvent = [this](int id) -> const Event* {
+        if (field_)
+            for (const auto& e : field_->map()->events) if (e.id == id) return &e;
+        for (const auto& e : commonEvents_.events) if (e.id == id) return &e;
+        return nullptr;
+    };
+}
+
+// The shared CallEvent routine pool: field_constant.dat offset 0x8d names map
+// 10000 (FieldClass::LoadCommonEvent); its event pack holds the common events
+// (0x104 = move-map, 0x103 = spawn, 0x101 = story change, ...).
+void Host::loadCommonEvents(const std::string& bundleDir) {
+    commonEvents_ = load_ffmap(bundleDir + "/data/common_events.ffmap");
+    if (commonEvents_.events.empty())
+        std::printf("[FFSmith] no common-event pool (data/common_events.ffmap)\n");
+    else
+        std::printf("[FFSmith] common events: %zu routines\n", commonEvents_.events.size());
 }
 
 SDL_Texture* Host::spriteTex(int img, int var, int& w, int& h) {

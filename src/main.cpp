@@ -50,10 +50,15 @@ static void printUsage(const char* exe) {
         "Controls: arrows/WASD move, Z confirm, Enter/Tab menu, X cancel, Esc quit. Resizable.\n", exe);
 }
 
-static void dump_events(const FfMap& m, int tile) {
+static void dump_events(const FfMap& m, int tile, const FfMap* common = nullptr) {
     std::printf("[FFSmith] map events: %zu\n", m.events.size());
     ScriptState st;                       // throwaway state for the dump
     VMEnv env; env.rand = [](int n) { return n > 0 ? 0 : 0; };
+    env.findEvent = [&](int id) -> const Event* {
+        for (const auto& e : m.events) if (e.id == id) return &e;
+        if (common) for (const auto& e : common->events) if (e.id == id) return &e;
+        return nullptr;
+    };
     for (size_t i = 0; i < m.events.size(); ++i) {
         const Event& e = m.events[i];
         std::printf("  ev[%zu] (%2d,%2d) type=%d boot=0x%02x img=%d/%d scripts=%zu appear=%d\n",
@@ -128,14 +133,19 @@ static int vmSelfTest() {
         expect(o.messages.empty() && o.sawEnd, "0x3f jumps over a block");
     }
     {
-        ScriptState st;                       // var write + warp idiom (0x6b + 0x66)
+        ScriptState st;             // door idiom: 0x6b vars + 0x66 CallEvent 0x104 -> 0x41
+        Event callee; callee.id = 0x104;     // minimal stand-in for common event 0x104
+        callee.scripts.push_back(hexblk("411f00000001000200030004"));  // map,layer,x,y,dir = v0..v4
+        callee.scripts.push_back(hexblk("57"));
+        VMEnv env2 = env;
+        env2.findEvent = [&](int id) -> const Event* { return id == 0x104 ? &callee : nullptr; };
         Event ew;
         ew.scripts.push_back(hexblk("6b0205" "0000" "000001f4" "0001" "00000000" "0002" "00000025" "0003" "0000001c" "0004" "00000001"));
         ew.scripts.push_back(hexblk("66010001040000"));
         ew.scripts.push_back(hexblk("57"));
-        VMOut o = run_event(ew, st, env);
+        VMOut o = run_event(ew, st, env2);
         expect(o.warpMap == 500 && o.warpX == 0x25 && o.warpY == 0x1c && o.warpDir == 1,
-               "0x6b/0x66 warp -> map 500 @(37,28)");
+               "0x6b + CallEvent 0x104 -> map 500 @(37,28)");
         expect(st.getVar(2, 0) == 500, "script var bank persists");
     }
     {
@@ -324,6 +334,8 @@ int main(int argc, char** argv) {
     int tile = (m.w > 0) ? fb.w / m.w : 32;
     std::printf("[FFSmith] %s: %dx%d cells, %d layers (overhead>L%d), %zu events, tile=%d -> %dx%d px\n",
                 map.c_str(), m.w, m.h, m.n_layers, m.overhead_threshold, m.events.size(), tile, fb.w, fb.h);
+    if (startCol < 0 && m.spawn_x >= 0 && m.spawn_x < m.w) startCol = m.spawn_x;  // map default spawn
+    if (startRow < 0 && m.spawn_y >= 0 && m.spawn_y < m.h) startRow = m.spawn_y;
     if (startCol < 0 || startCol >= m.w) startCol = m.w / 2;
     if (startRow < 0 || startRow >= m.h) startRow = m.h / 2;
 
@@ -332,7 +344,12 @@ int main(int argc, char** argv) {
         std::printf("[FFSmith] wrote framebuffer -> %s\n", shot.c_str());
         return 0;
     }
-    if (events_mode) { dump_events(m, tile); return 0; }
+    if (events_mode) {
+        static FfMap evCommon;
+        evCommon = load_ffmap(bundle + "/data/common_events.ffmap");
+        dump_events(m, tile, evCommon.events.empty() ? nullptr : &evCommon);
+        return 0;
+    }
 
     std::unique_ptr<Field> field = std::make_unique<Field>(&m, tile, startCol, startRow);
     if (loadedFacing >= 0) field->setFacing(loadedFacing);
@@ -347,9 +364,12 @@ int main(int argc, char** argv) {
         m = std::move(nm); fb = std::move(nfb);
         int t = (m.w > 0) ? fb.w / m.w : 32;
         if (sc < 0) sc = m.w / 2; else if (sc >= m.w) sc = m.w - 1;
+        if (sc < 0 && m.spawn_x >= 0 && m.spawn_x < m.w) sc = m.spawn_x;   // FFM4 map default
+        if (sr < 0 && m.spawn_y >= 0 && m.spawn_y < m.h) sr = m.spawn_y;
         if (sr < 0) sr = m.h / 2; else if (sr >= m.h) sr = m.h - 1;
         field = std::make_unique<Field>(&m, t, sc, sr);
         if (host) { host->setField(field.get(), fb); host->setOverhead(compose_range(bundle, m, m.overhead_threshold + 1, m.n_layers, false)); host->loadText(bundle, bankOf(key)); }
+        if (host) field->enterMap();   // fire on-load autos (cutscenes, parallels)
         curMap = key;
         return true;
     };
@@ -366,9 +386,45 @@ int main(int argc, char** argv) {
                 std::printf("[FFSmith] debug: flag[%d][%d] set\n", t, ix);
             }
         }
+        static FfMap walkCommon;
+        walkCommon = load_ffmap(bundle + "/data/common_events.ffmap");
+        walkEnv.findEvent = [&](int id) -> const Event* {
+            for (const auto& e : field->map()->events) if (e.id == id) return &e;
+            for (const auto& e : walkCommon.events) if (e.id == id) return &e;
+            return nullptr;
+        };
         field->setScript(&walkState, &walkEnv);
+        field->enterMap();
+        auto wireWalk = [&]() { field->setScript(&walkState, &walkEnv); field->enterMap(); };
         std::printf("[FFSmith] walk trace from (%d,%d) on %dx%d map:\n", startCol, startRow, m.w, m.h);
         for (char ch : walk) {
+            if (ch == 'C' || ch == 'c') {              // confirm (advance dialogue / talk)
+                InputState cin; cin.pressed = BTN_CONFIRM; field->update(cin);
+                std::printf("  C -> dlg=%d msg=%d choice=%d\n",
+                            (int)field->inDialogue(), field->dialogueMsg(), (int)field->choiceActive());
+                Warp cw = field->consumeWarp();
+                if (cw.valid()) {
+                    std::string key = find_map_key(bundle, cw.map);
+                    if (!key.empty() && loadInto(key, cw.x, cw.y, nullptr)) {
+                        wireWalk();
+                        std::printf("  >> WARP to %s @(%d,%d)\n", key.c_str(), cw.x, cw.y);
+                    } else
+                        std::printf("  >> WARP target map %d not found in bundle\n", cw.map);
+                }
+                continue;
+            }
+            if (ch == '.') {                            // idle frame (pump autos)
+                InputState nin; field->update(nin);
+                Warp iw = field->consumeWarp();
+                if (iw.valid()) {
+                    std::string key = find_map_key(bundle, iw.map);
+                    if (!key.empty() && loadInto(key, iw.x, iw.y, nullptr)) {
+                        wireWalk();
+                        std::printf("  >> WARP to %s @(%d,%d)\n", key.c_str(), iw.x, iw.y);
+                    }
+                }
+                continue;
+            }
             int btn = dirBtnFromChar(ch); if (!btn) continue;
             InputState in; in.held = (uint32_t)btn;
             int bc = field->col(), br = field->row();
@@ -381,9 +437,10 @@ int main(int argc, char** argv) {
             Warp w = field->consumeWarp();
             if (w.valid()) {
                 std::string key = find_map_key(bundle, w.map);
-                if (!key.empty() && loadInto(key, w.x, w.y, nullptr))
+                if (!key.empty() && loadInto(key, w.x, w.y, nullptr)) {
+                    wireWalk();
                     std::printf("  >> WARP to %s @(%d,%d)\n", key.c_str(), w.x, w.y);
-                else
+                } else
                     std::printf("  >> WARP target map %d not found in bundle\n", w.map);
             }
         }
@@ -400,8 +457,10 @@ int main(int argc, char** argv) {
         auto starts = load_start(bundle + "/data/start.bin");
         if (!starts.empty() && starts[0].valid() && startMapKey.empty()) {
             std::string k = find_map_key(bundle, starts[0].map);
-            if (!k.empty()) { startMapKey = k; startX = starts[0].x; startY = starts[0].y;
-                std::printf("[FFSmith] New Game start: scenario 0 -> %s @(%d,%d)\n", k.c_str(), startX, startY); }
+            // x/y stay -1: FieldMapStart passes layer -1, so the map's own
+            // default spawn (FFM4 header, FieldClass+0xdc48) decides.
+            if (!k.empty()) { startMapKey = k;
+                std::printf("[FFSmith] New Game start: scenario 0 -> %s (map default spawn)\n", k.c_str()); }
         }
         if (startMapKey.empty()) startMapKey = "g0_p0_m500";   // fallback (no start.bin)
     }
@@ -410,6 +469,7 @@ int main(int argc, char** argv) {
     host.setPlayerSprite(playerImg, playerVar);
     host.loadText(bundle, bankOf(map));
     host.setField(field.get(), fb);
+    host.loadCommonEvents(bundle);
     host.setStartMap(startMapKey);
     host.setStartPos(startX, startY);
     for (const auto& sf : setFlags) {

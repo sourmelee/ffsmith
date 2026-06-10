@@ -61,6 +61,11 @@ FfMap load_ffmap(const std::string& path) {
     m.overhead_threshold = (int)(resv & 0xFF);
     m.field_bgm  = (int)((resv >> 8) & 0xFF);   // 255 = none
     m.battle_bgm = (int)((resv >> 16) & 0xFF);
+    if (buf[3] >= '4' && o + 3 <= buf.size()) {  // FFM4: map default spawn
+        m.spawn_x = (buf[o] == 255) ? -1 : buf[o];
+        m.spawn_y = (buf[o+1] == 255) ? -1 : buf[o+1];
+        m.spawn_dir = buf[o+2]; o += 3;
+    }
     m.w = w; m.h = h; m.n_layers = nl;
     size_t cells = (size_t)w * h;
     for (int L = 0; L < nl; ++L) {
@@ -81,14 +86,18 @@ FfMap load_ffmap(const std::string& path) {
             o += cells;
         }
     }
-    if (buf[3] >= '2' && o + 2 <= buf.size()) {  // FFM2/FFM3 events block
-        const bool hasAppear = (buf[3] >= '3');   // FFM3: +31 appear bytes per event
+    if (buf[3] >= '2' && o + 2 <= buf.size()) {  // FFM2/3/4 events block
+        const bool hasAppear = (buf[3] >= '3');   // FFM3+: 31 appear bytes per event
+        const bool hasRect = (buf[3] >= '4');     // FFM4: rect w,h after x,y
         int ne = rd_u16(&buf[o]); o += 2;
         for (int e = 0; e < ne; ++e) {
-            if (o + (hasAppear ? 40u : 9u) > buf.size()) break;
+            if (o + (hasRect ? 44u : hasAppear ? 40u : 9u) > buf.size()) break;
             Event ev;
-            ev.x = buf[o]; ev.y = buf[o+1]; ev.type = buf[o+2]; ev.boot = buf[o+3];
-            ev.img = rd_i16(&buf[o+4]); ev.var = buf[o+6]; o += 7;
+            if (hasRect) { ev.id = rd_u16(&buf[o]); o += 2; }   // FFM4: event id first
+            ev.x = buf[o]; ev.y = buf[o+1]; o += 2;
+            if (hasRect) { ev.w = buf[o] ? buf[o] : 1; ev.h = buf[o+1] ? buf[o+1] : 1; o += 2; }
+            ev.type = buf[o]; ev.boot = buf[o+1];
+            ev.img = rd_i16(&buf[o+2]); ev.var = buf[o+4]; o += 5;
             if (hasAppear) { ev.appear.assign(buf.begin() + o, buf.begin() + o + 31); o += 31; }
             int ns = rd_u16(&buf[o]); o += 2;
             for (int s = 0; s < ns; ++s) {

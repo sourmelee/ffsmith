@@ -19,10 +19,13 @@
 
 namespace ffsmith {
 
+struct Event;  // data/bundle.h
+
 struct VMEnv {
     std::function<int(int)>  itemCount;  // owned count of item id (GetReferenceItem)
     std::function<bool(int)> partyHas;   // member id in party (GetReferenceParty)
     std::function<int(int)>  rand;       // uniform 0..n-1
+    std::function<const Event*(int)> findEvent;  // CallEvent 0x66: map events + common pool (map 10000)
 };
 
 struct ScriptState {
