@@ -344,8 +344,22 @@ void Host::stepInput() {
     held_prev_ = raw_held_;
 }
 
+void Host::updateAudio() {
+    if (!audio_.ok()) return;
+    // BGM follows the mode; playBgm() is a no-op when the id is already playing,
+    // so this self-corrects on every map/mode change. Battle BGM is set
+    // explicitly in startBattle() and is left alone here.
+    if (mode_ == Mode::Field && field_ && field_->map())
+        audio_.playBgm(field_->map()->field_bgm);
+    else if (mode_ == Mode::Title || mode_ == Mode::Intro)
+        audio_.playBgm(titleBgm_);
+    else if (mode_ == Mode::Debug)
+        audio_.stopBgm();
+}
+
 void Host::update(double /*dt*/) {
     ++animTimer_;
+    updateAudio();
     if (mode_ == Mode::Debug) {
         updateDebug(input_);
     } else if (mode_ == Mode::Battle) {
@@ -356,6 +370,7 @@ void Host::update(double /*dt*/) {
         if (input_.pressed & BTN_UP)   titleSel_ = (titleSel_ + n - 1) % n;
         if (input_.pressed & BTN_DOWN) titleSel_ = (titleSel_ + 1) % n;
         if (input_.pressed & BTN_CONFIRM) {
+            audio_.playSe(1);                                        // decide
             if (titleSel_ == 0) {                                    // New Game -> intro cinematics
                 newGame(); introState_ = 0; mode_ = Mode::Intro;
             } else if (titleSel_ == 1) {                            // Continue
@@ -798,6 +813,7 @@ bool Host::loadMenuData(const std::string& dir) {
     spells_ = load_spells(dir + "/data/spells.bin");
     levels_ = load_levels(dir + "/data/levels.bin");
     spriteGeo_ = load_spritegeo(dir + "/data/spritegeo.bin");
+    if (!audio_.ok()) { audio_.init(dir); audio_.setBgmVolume(0.65f); audio_.setSeVolume(0.85f); }
     Texture bg = load_tex(dir + "/ui/btlbg.tex");
     if (bg.valid() && renderer_) {
         if (btlbgTex_) SDL_DestroyTexture(btlbgTex_);
@@ -1227,6 +1243,8 @@ void Host::startBattle(int leadId) {
         lead = weak[std::rand() % (int)weak.size()];
     }
     if (!lead) return;
+    if (field_ && field_->map() && field_->map()->battle_bgm != 255)
+        audio_.playBgm(field_->map()->battle_bgm);   // battle theme; field BGM restored on endBattle (poll)
     auto push = [&](const Monster* m) {
         Combatant e; e.name = m->name; e.hp = e.maxhp = m->hp;
         e.atk = std::max(1, m->atk);      // A = monster attack stat (BTLACT 0x3c)
@@ -1487,4 +1505,4 @@ int Host::run() {
     return 0;
 }
 
-}  // namesp
+}  // namespace ffsmith

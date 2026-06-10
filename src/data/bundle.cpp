@@ -57,7 +57,10 @@ FfMap load_ffmap(const std::string& path) {
     m.var_slot0 = rd_u16(&buf[o]); o += 2;
     m.mc_slot1  = rd_i16(&buf[o]); o += 2;
     m.var_slot1 = rd_u16(&buf[o]); o += 2;
-    m.overhead_threshold = (int)rd_u32(&buf[o]); o += 4;   // reserved u32 = overhead-layer threshold
+    uint32_t resv = rd_u32(&buf[o]); o += 4;   // reserved u32: packs overhead + BGM ids
+    m.overhead_threshold = (int)(resv & 0xFF);
+    m.field_bgm  = (int)((resv >> 8) & 0xFF);   // 255 = none
+    m.battle_bgm = (int)((resv >> 16) & 0xFF);
     m.w = w; m.h = h; m.n_layers = nl;
     size_t cells = (size_t)w * h;
     for (int L = 0; L < nl; ++L) {

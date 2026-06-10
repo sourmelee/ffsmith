@@ -6,6 +6,7 @@
 #include <vector>
 #include "host/input.h"
 #include "data/bundle.h"
+#include "audio/audio.h"
 
 struct SDL_Window;
 struct SDL_Renderer;
@@ -137,6 +138,9 @@ private:
     Field*        field_      = nullptr;
     int           mapW_ = 0, mapH_ = 0;
     std::string   bundleDir_;
+    AudioManager  audio_;
+    int           titleBgm_ = 18;   // BGM for Title/Intro (opening theme; tweakable)
+    void          updateAudio();    // per-frame BGM-by-mode poll
     int           playerImg_ = -1, playerVar_ = 0;
     std::unordered_map<int, SDL_Texture*> sprites_;   // key = img*100+var
     std::unordered_map<int, SDL_Texture*> sheets_;    // tilesheets for anim overdraw (mc*100+var)

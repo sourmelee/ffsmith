@@ -26,6 +26,8 @@ struct FfMap {
     int mc_slot0 = -1, var_slot0 = 0;
     int mc_slot1 = -1, var_slot1 = 0;
     int overhead_threshold = 0;   // layers with index > this are overhead (FieldClass+0xdc2c)
+    int field_bgm = 255;          // ReserveBGM id -> audio/snd0_{id}.wav (255 = none)
+    int battle_bgm = 255;         // battle BGM id (255 = none)
     std::vector<std::vector<uint16_t>> layers;
     std::vector<uint8_t> event;     // raw event region (legacy; events[] is structured)
     std::vector<uint8_t> pass;      // per-cell 4-dir pass nibble (0 = solid)
