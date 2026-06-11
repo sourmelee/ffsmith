@@ -1,5 +1,7 @@
 #include "field/field.h"
 #include <cstdio>
+#include <cstdlib>
+#include <algorithm>
 
 namespace ffsmith {
 
@@ -49,10 +51,14 @@ bool Field::appears(const Event& e) const {
 bool Field::isSolid(int c, int r) const {
     if (c < 0 || r < 0 || c >= map_->w || r >= map_->h) return true;
     if (noClip_) return false;                 // debug no-clip: only bounds block
-    // Standing NPCs/objects block movement; position triggers (incl. visible door
-    // sprites) are walkable so you can step onto them and warp.
-    for (const auto& e : map_->events)
-        if (e.x == c && e.y == r && isStandingChara(e) && appears(e)) return true;
+    // Standing NPCs/objects block movement at their CURRENT (actor) position;
+    // position triggers (incl. visible door sprites) stay walkable.
+    for (const auto& a : actors_) {
+        if (a.evIndex < 0 || a.evIndex >= (int)map_->events.size()) continue;
+        const Event& e = map_->events[a.evIndex];
+        if (!isStandingChara(e) || !a.visible || !appears(e)) continue;
+        if ((a.col == c && a.row == r) || (a.moving && a.tcol == c && a.trow == r)) return true;
+    }
     if (map_->pass.empty()) return false;
     uint8_t nib = map_->pass[(size_t)r * map_->w + c];
     return (nib & 0x0f) == 0;
@@ -60,9 +66,13 @@ bool Field::isSolid(int c, int r) const {
 
 // An interactable NPC to talk to: a standing chara (sprite + script, action/talk boot).
 const Event* Field::npcAt(int c, int r) const {
-    for (const auto& e : map_->events)
-        if (e.x == c && e.y == r && !e.scripts.empty() && isStandingChara(e) && appears(e))
+    for (const auto& a : actors_) {
+        if (a.evIndex < 0 || a.evIndex >= (int)map_->events.size()) continue;
+        const Event& e = map_->events[a.evIndex];
+        if (a.col == c && a.row == r && !e.scripts.empty() && isStandingChara(e)
+            && a.visible && appears(e))
             return &e;
+    }
     return nullptr;
 }
 
@@ -96,6 +106,11 @@ void Field::enterMap() {
     runCount_.assign(map_->events.size(), 0);
     autoQueue_.clear();
     autoBudget_ = 32;
+    buildActors();
+    lookActorId_ = -2;
+    playerCmds_.clear(); playerCmdIdx_ = 0; playerWait_ = 0;
+    wait_ = PendingWait{};
+    resumeStack_.clear();
     for (const auto& e : map_->events) {
         if (e.scripts.empty() || !appears(e)) continue;
         if (isParallel(e) || e.boot == 0) queueAuto(&e);
@@ -113,7 +128,8 @@ void Field::rescanParallel() {
 }
 
 void Field::pumpAuto() {
-    if (dlgActive_ || choiceActive_ || warp_.valid() || pendingEnc_.valid() || autoQueue_.empty()) return;
+    if (dlgActive_ || choiceActive_ || warp_.valid() || pendingEnc_.valid()
+        || wait_.valid() || autoQueue_.empty()) return;
     const Event* e = autoQueue_.front();
     autoQueue_.erase(autoQueue_.begin());
     if (!appears(*e) || !canAutoRun(e)) return;
@@ -159,6 +175,200 @@ void Field::runScript(const Event* e, int startBlock) {
         std::printf("[FFSmith] script encounter -> formation %d (resume blk %d)\n",
                     pendingEnc_.formation, pendingEnc_.resumeBlock);
     }
+    // --- cutscene side effects ---
+    for (const auto& act : o.actions) {
+        Actor* a = actorById(act.id);
+        if (a) {
+            a->cmds = act.cmds; a->cmdIdx = 0;
+            std::printf("[FFSmith] actor %d: %zu command(s)\n", act.id, a->cmds.size());
+        } else {
+            // Unknown entity id: assume it targets the PLAYER (the hero is
+            // moved by 0x68 in cutscenes; his event id isn't in the map pack).
+            // APPROXIMATION — log so wrong guesses are visible.
+            playerCmds_ = act.cmds; playerCmdIdx_ = 0;
+            std::printf("[FFSmith] actor %d not found -> commands drive the PLAYER (%zu cmds)\n",
+                        act.id, act.cmds.size());
+        }
+    }
+    for (const auto& t : o.teleports) {
+        Actor* a = actorById(t.id);
+        if (!a) continue;
+        if (t.x >= 0) a->col = std::min(t.x, map_->w - 1);
+        if (t.y >= 0) a->row = std::min(t.y, map_->h - 1);
+        if (t.dir >= 0 && t.dir < 4) a->facing = t.dir;
+        a->moving = false; a->prog = 0;
+    }
+    for (const auto& v : o.visibles) {
+        Actor* a = actorById(v.first);
+        if (a) { a->visible = v.second != 0; a->alpha = a->visible ? 255 : 0; a->fade = 0; }
+    }
+    if (o.cameraTarget != -2) lookActorId_ = o.cameraTarget;
+    if (o.hasPlayerSet) {
+        if (o.playerX >= 0 && o.playerX < map_->w) col_ = o.playerX;
+        if (o.playerY >= 0 && o.playerY < map_->h) row_ = o.playerY;
+        if (o.playerDir >= 0 && o.playerDir < 4) facing_ = o.playerDir;
+        moving_ = false; prog_ = 0;
+    }
+    if (o.fadeMode >= 0 && env_ && env_->setFade)
+        env_->setFade(o.fadeMode, o.fadeR, o.fadeG, o.fadeB, o.fadeTicks);
+    if (o.pauseBlock >= 0) {
+        wait_.ev = o.pauseEv ? o.pauseEv : e;
+        wait_.block = o.pauseBlock;
+        wait_.ticks = o.waitTicks;
+        wait_.actors = o.waitActors;
+        std::printf("[FFSmith] script waits (%s) -> resume blk %d\n",
+                    o.waitActors ? "actors" : "ticks", o.pauseBlock);
+    }
+    if (!o.resumeStack.empty())                  // suspended 0x66 caller frames
+        resumeStack_.insert(resumeStack_.end(), o.resumeStack.begin(), o.resumeStack.end());
+}
+
+// After a pause resumes and its run finishes without pausing again, pop and
+// continue any suspended 0x66 caller frames (innermost-first = back of stack).
+void Field::continueChain() {
+    while (!scriptPaused() && !resumeStack_.empty()) {
+        const Event* e = resumeStack_.back().first;
+        int blk = resumeStack_.back().second;
+        resumeStack_.pop_back();
+        runScript(e, blk);
+    }
+}
+
+Actor* Field::actorById(int id) {
+    for (auto& a : actors_) if (a.id == id) return &a;
+    return nullptr;
+}
+
+bool Field::actorsIdle() const {
+    for (const auto& a : actors_) if (a.active()) return false;
+    return !(playerCmdIdx_ < playerCmds_.size() || playerWait_ > 0 || moving_);
+}
+
+bool Field::lookTargetPixel(int& px, int& py) const {
+    if (lookActorId_ == -2) return false;
+    for (const auto& a : actors_)
+        if (a.id == lookActorId_) { px = a.pixelX(tile_); py = a.pixelY(tile_); return true; }
+    return false;                                // unknown id -> player
+}
+
+void Field::buildActors() {
+    actors_.clear();
+    for (size_t i = 0; i < map_->events.size(); ++i) {
+        const Event& e = map_->events[i];
+        Actor a;
+        a.evIndex = (int)i; a.id = e.id;
+        a.col = e.x; a.row = e.y;
+        a.facing = FACE_DOWN;
+        actors_.push_back(a);
+    }
+}
+
+// Interpret one command byte for an actor (table DAT_00418d40; see field.h).
+void Field::applyCommandTo(Actor& a, int cmd) {
+    static const int DXC[8] = {0, 0, -1, 1, -1, 1, -1, 1};   // D U L R + diagonals
+    static const int DYC[8] = {1, -1, 0, 0, 1, 1, -1, -1};
+    static const int TURN_L[4] = {2, 3, 1, 0};               // DAT_001798c0 pairs
+    static const int TURN_R[4] = {3, 2, 0, 1};
+    auto facePlayer = [&](bool toward) {
+        int dx = col_ - a.col, dy = row_ - a.row;
+        int f;
+        if (std::abs(dx) > std::abs(dy)) f = dx < 0 ? FACE_LEFT : FACE_RIGHT;
+        else f = dy < 0 ? FACE_UP : FACE_DOWN;
+        if (!toward) f ^= 1;                       // reverse (D<->U, L<->R pair-flip)
+        a.facing = f;
+    };
+    auto walk = [&](int dir8) {
+        a.dx = DXC[dir8 & 7]; a.dy = DYC[dir8 & 7];
+        if (dir8 < 4) a.facing = dir8;
+        else a.facing = (a.dx < 0) ? FACE_LEFT : FACE_RIGHT;
+        int nc = a.col + a.dx, nr = a.row + a.dy;
+        // scripted moves don't collide (cutscene paths are authored clear) but stay in bounds
+        if (nc < 0 || nr < 0 || nc >= map_->w || nr >= map_->h) return;
+        a.tcol = nc; a.trow = nr; a.prog = 0; a.moving = true;
+    };
+    if (cmd <= 0x07) { walk(cmd); return; }                       // walk 8 dirs
+    if (cmd == 0x08) { facePlayer(true); walk(a.facing); return; }  // step toward player
+    if (cmd == 0x09) { facePlayer(false); walk(a.facing); return; } // step away
+    if (cmd == 0x0a) { walk(a.facing); return; }                  // step ahead
+    if (cmd == 0x0b) { a.waitTicks = tile_ / std::max(1, a.speed); return; }   // pause one beat
+    if (cmd == 0x0c) { a.fade = -1; return; }                     // fade out
+    if (cmd == 0x0d) { a.fade = +1; a.visible = true; return; }   // fade in
+    if (cmd >= 0x10 && cmd <= 0x13) { a.facing = cmd - 0x10; return; }
+    if (cmd >= 0x14 && cmd <= 0x19) {                             // turn left/right (3 pairs)
+        a.facing = ((cmd - 0x14) & 1) ? TURN_R[a.facing & 3] : TURN_L[a.facing & 3];
+        return;
+    }
+    if (cmd == 0x1a || cmd == 0x1b) {                             // random turn
+        a.facing = (std::rand() & 1) ? TURN_L[a.facing & 3] : TURN_R[a.facing & 3];
+        return;
+    }
+    if (cmd == 0x1c) { facePlayer(true); return; }
+    if (cmd == 0x1d) { facePlayer(false); return; }
+    if (cmd >= 0x20 && cmd <= 0x24) { a.alpha = std::min(255, (cmd - 0x20) * 64); return; }
+    if (cmd >= 0x25 && cmd <= 0x29) { a.speed = 1 << std::min(3, cmd - 0x25); return; }
+    if (cmd >= 0x2a && cmd <= 0x2d) { return; }                   // anim frequency (cosmetic)
+    if (cmd == 0x30 || cmd == 0x32) { walk(a.facing); return; }   // jump ~ walk (APPROX)
+    if (cmd >= 0x40 && cmd <= 0x44) { return; }                   // pose (not rendered yet)
+    if (cmd == 0x45) { a.waitTicks = tile_; return; }             // long pause
+    if (cmd >= 0x80 && cmd <= 0x8d) {                             // chara flag set/clear
+        int idx = (cmd - 0x80) >> 1; bool clear = (cmd & 1) != 0;
+        if (idx == 4) { a.visible = !clear; a.alpha = a.visible ? 255 : 0; }   // flag 0x400
+        else if (idx == 2) a.animOn = !clear;                                  // flag 0x2
+        return;
+    }
+    // 0x90 face-current = no-op; 0x91 and unknowns: skip (logged once per run elsewhere)
+}
+
+void Field::tickActors() {
+    for (auto& a : actors_) {
+        if (a.fade != 0) {
+            a.alpha += a.fade * 16;
+            if (a.alpha <= 0)   { a.alpha = 0; a.fade = 0; a.visible = false; }
+            if (a.alpha >= 255) { a.alpha = 255; a.fade = 0; }
+        }
+        if (a.waitTicks > 0) { --a.waitTicks; continue; }
+        if (a.moving) {
+            a.prog += a.speed;
+            if (a.prog >= tile_) { a.col = a.tcol; a.row = a.trow; a.prog = 0; a.moving = false; }
+            continue;
+        }
+        while (a.cmdIdx < a.cmds.size()) {                 // consume instant commands
+            int cmd = a.cmds[a.cmdIdx++];
+            applyCommandTo(a, cmd);
+            if (a.moving || a.waitTicks > 0 || a.fade != 0) break;
+        }
+    }
+    // scripted player commands (0x68 fallback)
+    if (playerWait_ > 0) { --playerWait_; }
+    else if (!moving_ && playerCmdIdx_ < playerCmds_.size()) {
+        static const int DXC[8] = {0, 0, -1, 1, -1, 1, -1, 1};
+        static const int DYC[8] = {1, -1, 0, 0, 1, 1, -1, -1};
+        int cmd = playerCmds_[playerCmdIdx_++];
+        if (cmd <= 0x07) {
+            int nc = col_ + DXC[cmd & 7], nr = row_ + DYC[cmd & 7];
+            if (cmd < 4) facing_ = cmd;
+            if (nc >= 0 && nr >= 0 && nc < map_->w && nr < map_->h) {
+                tcol_ = nc; trow_ = nr; moveDir_ = (cmd < 4) ? cmd : facing_;
+                prog_ = 0; moving_ = true;
+            }
+        } else if (cmd >= 0x10 && cmd <= 0x13) facing_ = cmd - 0x10;
+        else if (cmd == 0x0b) playerWait_ = tile_ / 2;
+        else if (cmd == 0x45) playerWait_ = tile_;
+    }
+}
+
+void Field::tickWaits() {
+    if (!wait_.valid() || dlgActive_ || choiceActive_) return;
+    bool done = false;
+    if (wait_.actors) done = actorsIdle();
+    else if (wait_.ticks > 0) { --wait_.ticks; done = (wait_.ticks == 0); }
+    else done = true;
+    if (done) {
+        const Event* e = wait_.ev; int blk = wait_.block;
+        wait_ = PendingWait{};
+        runScript(e, blk);
+        continueChain();
+    }
 }
 
 // The battle is over: continue the paused script at the block after 0x50.
@@ -170,6 +380,7 @@ void Field::resumeAfterBattle() {
     pendingEnc_ = VMEncounter{};
     encLaunched_ = false;
     if (e && blk >= 0) runScript(e, blk);
+    continueChain();
 }
 
 void Field::confirm() {
@@ -180,6 +391,7 @@ void Field::confirm() {
         choiceActive_ = false; pendingEv_ = nullptr; choice_ = VMChoice{};
         std::printf("[FFSmith] choice %d -> blk %d\n", choiceSel_, blk);
         if (e) runScript(e, blk);
+        continueChain();
         return;
     }
     if (dlgActive_) {                       // advance / close dialogue
@@ -211,6 +423,7 @@ void Field::cancel() {
     const Event* e = pendingEv_;
     choiceActive_ = false; pendingEv_ = nullptr; choice_ = VMChoice{};
     if (e) runScript(e, blk);
+    continueChain();
 }
 
 void Field::choiceMove(int d) {
@@ -220,6 +433,8 @@ void Field::choiceMove(int d) {
 }
 
 void Field::update(const InputState& in) {
+    tickActors();                           // cutscene actors + fades always tick
+    tickWaits();                            // resume scripts whose wait elapsed
     pumpAuto();                             // run pending auto events when idle
     if (choiceActive_) {                    // choice menu eats input
         if (in.pressed & BTN_UP)    choiceMove(-1);
@@ -241,7 +456,7 @@ void Field::update(const InputState& in) {
             }
         }
     }
-    if (!moving_) {
+    if (!moving_ && !playerScripted()) {
         int d = dirFromHeld(in.held);
         if (d >= 0) {
             facing_ = d;

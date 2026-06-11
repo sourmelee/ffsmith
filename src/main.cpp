@@ -264,7 +264,7 @@ int main(int argc, char** argv) {
     int menuPageFlag = 0, battleMon = -1, battleSim = -1;
     bool spellTest = false, saveFlag = false, loadFlag = false, itemTest = false, equipTest = false;
     int animTick = 0; bool dmgTest = false, noOverhead = false, levelTest = false, reviveTest = false, menuTest = false; int introBeat = -1;
-    bool encTest = false, encountersOn = false;
+    bool encTest = false, encountersOn = false, cutTest = false;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
         if      (!std::strcmp(a, "--bundle")) bundle = takeStr(argc, argv, i, "");
@@ -292,6 +292,7 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--revivetest")) reviveTest = true;
         else if (!std::strcmp(a, "--menutest")) menuTest = true;
         else if (!std::strcmp(a, "--enctest")) encTest = true;
+        else if (!std::strcmp(a, "--cuttest")) cutTest = true;
         else if (!std::strcmp(a, "--encounters")) encountersOn = true;
         else if (!std::strcmp(a, "--vmtest")) return vmSelfTest();
         else if (!std::strcmp(a, "--setflag")) setFlags.push_back(takeStr(argc, argv, i, ""));
@@ -516,6 +517,7 @@ int main(int argc, char** argv) {
     if (reviveTest) { host.selfTestRevive(); return 0; }
     if (menuTest) { host.selfTestMenu(); return 0; }
     if (encTest) { host.setMapKey(map); host.selfTestEncounter(); return 0; }
+    if (cutTest) { field->enterMap(); host.selfTestCutscene(); return 0; }
     if (encountersOn) host.setRandomEncounters(true);
     if (saveFlag) { writeSave(bundle, map, startCol, startRow, face < 0 ? 0 : face, playerImg, host); return 0; }
     host.debugSelectMap(map);
@@ -579,7 +581,7 @@ int main(int argc, char** argv) {
             std::string key = find_map_key(bundle, w.map);
             if (!key.empty() && loadInto(key, w.x, w.y, &host)) {
                 host.setMapKey(key);
-                std::printf("[FFSmith] warped to %s @(%d,%d)\n", key.c_str(), w.x, w.y);
+                std::printf("[FFSmith] warped to %s @(%d,%d) dir %d\n", key.c_str(), w.x, w.y, w.dir);
             } else
                 std::fprintf(stderr, "[FFSmith] warp target map %d not found\n", w.map);
         }

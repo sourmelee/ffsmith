@@ -29,6 +29,10 @@ struct VMEnv {
     // GetReference target 8 -> GetReferenceBattle (c:135841): type 3 = last
     // battle result (1 = won [flag bit9 clear], 2 = escaped [bit10]).
     std::function<long(int, long)> battleRef;    // (type, idx) -> value
+    // 0x2a SetFade -> Host (fades persist ACROSS map changes: out -> warp -> in).
+    // mode 0 = fade OUT (to color), mode 1 = fade IN (from script usage:
+    // scenes open with mode 1 + dur, and end with mode 0 + wait before warps).
+    std::function<void(int, int, int, int, int)> setFade;  // (mode, r, g, b, ticks)
 };
 
 struct ScriptState {

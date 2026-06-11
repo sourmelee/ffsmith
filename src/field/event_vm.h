@@ -27,6 +27,12 @@ struct VMEncounter {
     bool valid() const { return formation >= 0; }
 };
 
+// One 0x68 StartEntityAction: command bytes for an actor (FieldClass command
+// table DAT_00418d40, extracted from libjniproxy.so — see formats/events.md).
+struct VMActorAction { int id = -1; int mode = 0; std::vector<uint8_t> cmds; };
+// One 0x20 TeleportNPC (absent fields = -1 -> keep current).
+struct VMTeleport { int id = -1, x = -1, y = -1, dir = -1; };
+
 struct VMOut {
     std::vector<int> messages;       // SetMessage ids, in execution order
     std::vector<std::string> log;    // human-readable action trace
@@ -38,6 +44,23 @@ struct VMOut {
     int  bgm = -1;                   // PlayBGM track (0x35), if any
     bool hasEncounter = false;       // stopped at a 0x50 — battle, then resume
     VMEncounter enc;
+    // --- cutscene side effects (applied by Field in order) ---
+    std::vector<VMActorAction> actions;          // 0x68
+    std::vector<VMTeleport> teleports;           // 0x20
+    std::vector<std::pair<int,int>> visibles;    // 0x21: (id, on)
+    int cameraTarget = -2;                       // 0x1b: entity id (-2 = none)
+    int playerX = -1, playerY = -1, playerDir = -1;
+    bool hasPlayerSet = false;                   // 0x55
+    int fadeMode = -1, fadeR = 0, fadeG = 0, fadeB = 0, fadeTicks = 0;  // 0x2a
+    bool fadeWait = false;
+    // --- timed pauses (resume via run_event(ev, st, env, pauseBlock)) ---
+    int  waitTicks = -1;             // 0x32: pause N ticks
+    bool waitActors = false;         // 0x69: pause until actors idle
+    int  pauseBlock = -1;            // block to resume at
+    const Event* pauseEv = nullptr;
+    // When a pause happens inside a 0x66 callee, the caller frames that must
+    // continue after the innermost resume finishes (outermost last).
+    std::vector<std::pair<const Event*, int>> resumeStack;
 };
 
 // Execute an event's script blocks from `startBlock` (FieldClass::MoveEventScript

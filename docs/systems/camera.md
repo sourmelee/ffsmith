@@ -2,7 +2,7 @@
 
 *Snapshot 2026-06-10. Source: `src/host/host.cpp:render()` (Field branch). Original: `FieldClass::MoveScroll` / `InitScroll` (c:130788), `GetCurrentScrollX/Y`.*
 
-The camera is **computed per frame inside `Host::render`** — there is no camera object.
+The camera is **computed per frame inside `Host::render`** with a persistent eased position (2026-06-11): the target is the player or, after `0x1b CameraFollow`, the look-actor (`Field::lookTargetPixel`); `camPX_/camPY_` glide toward it (step = max(2, dist/12)), snapping on map swaps. This reproduces the original's SetLookChara re-target + scroll glide (MEDIUM: easing curve is ours, not MoveScroll's decoded math).
 
 - Viewport = window size / integer scale (min 16×16); zoom via `SDL_RenderSetScale`.
 - Target: center the player's interpolated pixel position (`pixelX/Y + tile/2`).
@@ -11,7 +11,7 @@ The camera is **computed per frame inside `Host::render`** — there is no camer
 
 ## Divergences / open
 
-- **No scripted camera.** The original supports script-driven scroll (`InitScroll` targets, `ScrollToOffsetCellX/Y`, `IsAddScroll`); cutscenes that pan the camera will look wrong until ported. MEDIUM priority once cutscene fidelity matters.
+- ~~No scripted camera~~ **0x1b CameraFollow implemented 2026-06-11** (re-target + ease). Still open: explicit scroll-offset ops (`ScrollToOffsetCellX/Y`), exact MoveScroll easing curve.
 - **No wrap-aware scrolling** (world maps): clamping only, consistent with movement's no-wrap limitation.
 - **No screen shake / battle transitions.**
 

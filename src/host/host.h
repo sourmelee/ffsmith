@@ -71,6 +71,7 @@ public:
     void startFormationBattle(const VMEncounter& enc);  // 0x50 scripted battle
     void setRandomEncounters(bool b) { encountersOn_ = b; }
     void selfTestEncounter();    // headless: 0x50 pause -> battle -> resume
+    void selfTestCutscene();     // headless: 0x68/0x69/0x32 actor moves + waits
     void newGame();
     void selfTestItemUse();      // headless: damage a member, use a Potion, report
     void selfTestEquip();        // headless: swap a weapon, report stat + inventory change
@@ -153,6 +154,11 @@ private:
     int           titleBgm_ = 18;   // BGM for Title/Intro (opening theme; tweakable)
     void          updateAudio();    // per-frame BGM-by-mode poll
     int           playerImg_ = -1, playerVar_ = 0;
+    int  camPX_ = 0, camPY_ = 0; bool camInit_ = false;   // smooth camera (resets per map)
+    // 0x2a screen fade — Host-owned so it persists across warps (out -> warp -> in).
+    int  fadeAlpha_ = 0, fadeTarget_ = 0, fadeStep_ = 0;
+    uint8_t fadeR_ = 0, fadeG_ = 0, fadeB_ = 0;
+    void clearFade() { fadeAlpha_ = fadeTarget_ = fadeStep_ = 0; }
     std::unordered_map<int, SDL_Texture*> sprites_;   // key = img*100+var
     std::unordered_map<int, SDL_Texture*> sheets_;    // tilesheets for anim overdraw (mc*100+var)
     std::unordered_map<int, std::unordered_map<int, ChipAnim>> chipAnim_;   // mc -> inner -> anim

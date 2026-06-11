@@ -41,4 +41,5 @@ An event's script is a list of **length-prefixed blocks**; block 0 is the entry.
 ## Known gaps (the current frontier)
 
 - ~~`0x50 ScriptEncount`~~ implemented 2026-06-10: pauses like a choice (`VMOut.hasEncounter` + resume block), Host fights the formation, `Field::resumeAfterBattle` continues; result via GetReference target 8. `--enctest` verifies on real bank-0 data. Open: `bsc.dat` battle scripts, condition-flag table values.
-- Common parallels 0x102/0x105/0x106 not pumped; `GetReference` targets chara/event/etc. stubbed (return 0, logged); page register (0xe474) semantics partial; choice-line text source provisional (option value used as msg id); NameInput, fades, NPC-move ops log-skip.
+- Common parallels 0x102/0x105/0x106 not pumped; `GetReference` targets chara/event/etc. stubbed (return 0, logged); page register (0xe474) semantics partial; choice-line text source provisional (option value used as msg id); NameInput log-skips.
+- **Implemented 2026-06-11 (cutscene direction):** 0x68/0x69 actor command sequences + script suspension (incl. through 0x66 call stacks — `VMOut.resumeStack`), 0x32 timed waits, 0x1b camera re-target, 0x20/0x21/0x55 teleports/visibility/player-set, 0x2a screen fades. `Field` owns an actor per event; `--cuttest` covers move+wait+resume. Remaining: poses, jump arcs (walk-approximated), 0x91, MoveCharaAuto wander.

@@ -53,7 +53,8 @@ FFSmith is **~10 days old and already plays a vertical slice of the real game**:
 ### Missing entirely
 - ~~`0x50 ScriptEncount`~~ **DONE 2026-06-10**: scripted battles pause the VM, fight the real formation (encounters.bin, FENC), resume the script with the result readable via GetReference target 8 (`--enctest` PASS). Still missing within battles: `bsc.dat` battle scripts, formation x/y placement rendering, per-formation loss handling (scripted losses currently revive-to-1HP and resume — flagged approximation).
 - Random encounters: decoded areas ship in FFM5 and a flag-gated approximation roll exists (`--encounters`, default off) — the original roll formula is still open.
-- AP/ability learning, status effects, elemental/crit modifiers, shops, NameInput UI, fades/palette ops, NPC scripted movement (`MoveCharaEvent`) and autonomous walk (`MoveCharaAuto`) — NPCs render statically.
+- ~~NPC scripted movement~~ **DONE 2026-06-11**: full cutscene direction — actor system (per-event movable actors with walk-anim/facing/alpha), 0x68 command sequences (decoded 68-command table), 0x69/0x32 script suspension with call-stack resume, 0x1b camera re-targeting with eased pans, 0x2a screen fades, 0x20/0x21/0x55 teleports/visibility. Retail intro plays headless with direction through the prologue battle into the m150 exit (`--cuttest` PASS). Remaining in this area: poses, jump arcs, `MoveCharaAuto` idle wander (townsfolk still stand still).
+- AP/ability learning, status effects, elemental/crit modifiers, shops, NameInput UI, palette ops.
 - Common parallels (0x102/0x105/0x106…), page register (0xe474) full semantics, op 0x32 message-wait.
 - Perspective/tilted world-map renderer + Far background (m1 flyover renders flat); FFD title-logo asset (bundle ships the FFL logo).
 - Original save format (`GameClass::SaveGameData` → `save.bin`, 15 KB/slot) — FFSmith uses its own `FSAV`.

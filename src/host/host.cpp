@@ -182,6 +182,7 @@ void Host::setOverhead(const Texture& img) {
 void Host::setField(Field* f, const Texture& mapImg) {
     if (!ensureMapTexture(mapImg)) return;
     field_ = f;
+    camInit_ = false;                       // snap the camera on map swaps
     if (field_) {
         if (!vmEnv_.rand) wireScriptEnv();
         field_->setScript(&scriptState_, &vmEnv_);
@@ -207,6 +208,16 @@ void Host::wireScriptEnv() {
     // GetReferenceBattle (c:135841) type 3: 1 = won, 2 = escaped, 0 = lost.
     vmEnv_.battleRef = [this](int type, long) -> long {
         return type == 3 ? lastBattleResult_ : 0;
+    };
+    // 0x2a SetFade: mode 0 = fade OUT (to color), mode 1+ = fade IN. Evidence:
+    // every intro scene OPENS with mode 1 + duration and ENDS with mode 0 +
+    // block-until-done right before its warp (m1 ev14/ev18, m200 ev2).
+    vmEnv_.setFade = [this](int mode, int r, int g, int b, int ticks) {
+        fadeR_ = (uint8_t)r; fadeG_ = (uint8_t)g; fadeB_ = (uint8_t)b;
+        fadeTarget_ = (mode == 0) ? 255 : 0;
+        if (fadeTarget_ == 255 && fadeAlpha_ == 0) fadeAlpha_ = 1;       // start ramp
+        int dur = ticks > 0 ? ticks : 16;
+        fadeStep_ = std::max(1, 255 / dur);
     };
     vmEnv_.findEvent = [this](int id) -> const Event* {
         if (field_)
@@ -401,6 +412,10 @@ void Host::updateAudio() {
 void Host::update(double /*dt*/) {
     ++animTimer_;
     updateAudio();
+    if (fadeAlpha_ != fadeTarget_) {                       // 0x2a fade ramp
+        if (fadeAlpha_ < fadeTarget_) fadeAlpha_ = std::min(fadeTarget_, fadeAlpha_ + fadeStep_);
+        else fadeAlpha_ = std::max(fadeTarget_, fadeAlpha_ - fadeStep_);
+    }
     if (mode_ == Mode::Debug) {
         updateDebug(input_);
     } else if (mode_ == Mode::Battle) {
@@ -517,7 +532,21 @@ void Host::render() {
 
         const int tile = field_->tile();
         const int px = field_->pixelX(), py = field_->pixelY();
-        int camX = px + tile / 2 - vw / 2, camY = py + tile / 2 - vh / 2;
+        // Camera target: the look-actor (0x1b CameraFollow) or the player.
+        int tx = px, ty = py;
+        field_->lookTargetPixel(tx, ty);
+        int wantX = tx + tile / 2 - vw / 2, wantY = ty + tile / 2 - vh / 2;
+        // Smooth pan toward the target (SetLookChara re-target + MoveScroll glide).
+        if (!camInit_) { camPX_ = wantX; camPY_ = wantY; camInit_ = true; }
+        auto ease = [](int cur, int want) {
+            int d = want - cur;
+            if (d == 0) return cur;
+            int step = std::max(2, std::abs(d) / 12);
+            if (std::abs(d) <= step) return want;
+            return cur + (d > 0 ? step : -step);
+        };
+        camPX_ = ease(camPX_, wantX); camPY_ = ease(camPY_, wantY);
+        int camX = camPX_, camY = camPY_;
         int offX = 0, offY = 0;
         if (mapW_ <= vw) { camX = 0; offX = (vw - mapW_) / 2; }
         else { if (camX < 0) camX = 0; if (camX > mapW_ - vw) camX = mapW_ - vw; }
@@ -550,16 +579,25 @@ void Host::render() {
             }
         }
 
-        // NPC sprites (or faint marker for script-only triggers)
-        for (const auto& e : field_->map()->events) {
+        // NPC sprites — drawn from ACTOR state (position/facing/walk-anim/alpha),
+        // so scripted movement (0x68) and fades render live.
+        for (const auto& a : field_->actors()) {
+            if (a.evIndex < 0 || a.evIndex >= (int)field_->map()->events.size()) continue;
+            const Event& e = field_->map()->events[a.evIndex];
             if (!field_->appears(e)) continue;   // CheckEventAppear gate
-            int lx = offX + e.x * tile - camX, ly = offY + e.y * tile - camY;
+            if (!a.visible || a.alpha <= 0) continue;
+            int lx = offX + a.pixelX(tile) - camX, ly = offY + a.pixelY(tile) - camY;
             if (e.img > 0) {
-                if (!drawSprite(e.img, e.var, FACE_DOWN, 0, lx, ly, tile)) {
+                int tw = 0, th = 0;
+                SDL_Texture* tex = spriteTex(e.img, e.var, tw, th);
+                if (tex && a.alpha < 255) SDL_SetTextureAlphaMod(tex, (Uint8)a.alpha);
+                bool ok = drawSprite(e.img, e.var, a.facing, a.animCol(tile), lx, ly, tile);
+                if (tex) SDL_SetTextureAlphaMod(tex, 255);
+                if (!ok) {
                     SDL_SetRenderDrawColor(renderer_, 80, 170, 255, 200);
                     SDL_Rect er{ lx, ly, tile, tile }; SDL_RenderFillRect(renderer_, &er);
                 }
-            } else if (!e.scripts.empty()) {
+            } else if (!e.scripts.empty() && overlayOn_) {
                 SDL_SetRenderDrawColor(renderer_, 120, 255, 120, 70);
                 SDL_Rect er{ lx, ly, tile, tile }; SDL_RenderFillRect(renderer_, &er);
             }
@@ -583,6 +621,12 @@ void Host::render() {
 
         // Overhead layers (1+): drawn ABOVE the player so it passes behind canopies/roofs.
         if (overhead_tex_) SDL_RenderCopy(renderer_, overhead_tex_, &src, &dst);
+
+        // Screen fade (0x2a SetFade; Host-owned, persists across warps)
+        if (fadeAlpha_ > 0) {
+            SDL_SetRenderDrawColor(renderer_, fadeR_, fadeG_, fadeB_, (Uint8)fadeAlpha_);
+            SDL_Rect full{ 0, 0, vw, vh }; SDL_RenderFillRect(renderer_, &full);
+        }
 
         if (overlayOn_) {
             const FfMap* mp = field_->map();
@@ -910,6 +954,7 @@ void Host::debugSelectMap(const std::string& key) {
 bool Host::consumeDebugStart(DebugStart& out) {
     if (!dbgStart_) return false;
     dbgStart_ = false;
+    clearFade();                                  // launcher jumps never start black
     out.map    = (dbgMapIdx_ >= 0 && dbgMapIdx_ < (int)dbgMaps_.size()) ? dbgMaps_[dbgMapIdx_] : std::string();
     out.img    = (dbgSprIdx_ >= 0 && dbgSprIdx_ < (int)dbgSprites_.size()) ? dbgSprites_[dbgSprIdx_] : -1;
     out.x = dbgX_; out.y = dbgY_; out.facing = dbgFacing_; out.noclip = dbgNoclip_;
@@ -1090,6 +1135,7 @@ int Host::memberMaxMp(int i) const {
 }
 
 void Host::newGame() {
+    clearFade();
     gameParty_.clear();
     int n = std::min((int)chars_.size(), 4);
     for (int i = 0; i < n; ++i) {
@@ -1266,6 +1312,45 @@ void Host::maybeRandomEncounter() {
     std::printf("[FFSmith] random encounter: area set %d @(%d,%d)\n", chosen->set_id, cx, cy);
     startFormationBattle(enc);
     scriptBattle_ = false;            // random battles don't resume a script
+}
+
+void Host::selfTestCutscene() {
+    if (!field_) { std::printf("[cuttest] no field\n"); return; }
+    auto hexblk = [](const char* hx) {
+        std::vector<uint8_t> v;
+        for (const char* q = hx; q[0] && q[1]; q += 2) {
+            auto nib = [](char c) { return c <= '9' ? c - '0' : (c | 32) - 'a' + 10; };
+            v.push_back((uint8_t)((nib(q[0]) << 4) | nib(q[1])));
+        }
+        return v;
+    };
+    // pick an actor with a u8-addressable id
+    const Actor* pick = nullptr;
+    for (const auto& a : field_->actors()) if (a.id >= 0 && a.id <= 255) { pick = &a; break; }
+    if (!pick) { std::printf("[cuttest] no addressable actor\n"); return; }
+    int id = pick->id, c0 = pick->col, r0 = pick->row;
+    char b0[32];
+    std::snprintf(b0, sizeof(b0), "68%02x000004" "0303001c", id);  // walk R,R,D + face player
+    static Event ev;
+    ev.scripts.clear();
+    ev.scripts.push_back(hexblk(b0));
+    ev.scripts.push_back(hexblk("69"));                  // wait for the actor
+    ev.scripts.push_back(hexblk("32000a"));              // wait 10 ticks
+    ev.scripts.push_back(hexblk("0400000000060001"));    // resume proof: set flag0[6]
+    ev.scripts.push_back(hexblk("57"));
+    field_->debugRunEvent(&ev);
+    InputState none{};
+    int t = 0;
+    while (t++ < 600 && !scriptState_.getFlag(0, 6)) field_->update(none);
+    const Actor* after = nullptr;
+    for (const auto& a : field_->actors()) if (a.id == id) { after = &a; break; }
+    bool moved = after && (after->col == c0 + 2) && (after->row == r0 + 1);
+    bool resumed = scriptState_.getFlag(0, 6) != 0;
+    std::printf("[cuttest] actor %d (%d,%d)->(%d,%d) facing=%d ticks=%d\n",
+                id, c0, r0, after ? after->col : -1, after ? after->row : -1,
+                after ? after->facing : -1, t);
+    std::printf("[cuttest] %s (moved=%d, wait+resume=%d)\n",
+                (moved && resumed) ? "PASS" : "FAIL", (int)moved, (int)resumed);
 }
 
 void Host::selfTestEncounter() {

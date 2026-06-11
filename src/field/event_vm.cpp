@@ -47,10 +47,12 @@ static void run_event_depth(const Event& ev, ScriptState& st, const VMEnv& env,
                 o.log.push_back(tmp);
                 break;
             }
-            case 0x32: {                                     // wait N frames (placeholder)
-                std::snprintf(tmp, sizeof(tmp), "blk%d: Wait %d (skipped)", pc, rdW(b, 1));
+            case 0x32: {                  // timed wait (ctx wait mode 1; ticks assumed = frames)
+                o.waitTicks = rdW(b, 1);
+                o.pauseBlock = pc + 1; o.pauseEv = &ev;
+                std::snprintf(tmp, sizeof(tmp), "blk%d: Wait %d ticks (pause)", pc, o.waitTicks);
                 o.log.push_back(tmp);
-                break;
+                return;
             }
             case 0x03: {                                     // SetReferenceVariable
                 // refTarget=b[1], mask=b[2]; varType=w@3, varIdx=w@5, calcOp=w@7,
@@ -102,6 +104,90 @@ static void run_event_depth(const Event& ev, ScriptState& st, const VMEnv& env,
                 std::snprintf(tmp, sizeof(tmp), "blk%d: timer=%d", pc, st.timer);
                 o.log.push_back(tmp);
                 break;
+            }
+            case 0x1b: {                                     // CameraFollow (SetLookChara)
+                int id = (b.size() > 2) ? b[2] : 0;
+                if (b.size() > 1 && (b[1] & 1)) id = (int)st.getVar(2, id);
+                o.cameraTarget = id;
+                std::snprintf(tmp, sizeof(tmp), "blk%d: CameraFollow entity %d", pc, id);
+                o.log.push_back(tmp);
+                break;
+            }
+            case 0x20: {                  // TeleportNPC (present mask b1, ind mask b2)
+                if (b.size() < 8) break;
+                int present = b[1], indm = b[2];
+                auto val = [&](int bi, int idx) {
+                    int v = b[bi];
+                    if ((indm >> idx) & 1) v = (int)st.getVar(2, v);
+                    return v;
+                };
+                VMTeleport t;
+                t.id = val(3, 0);
+                // present-mask bits: 0=layer, 1=x, 2=y, 3=dir (absent -> keep)
+                if ((present >> 1) & 1) t.x = val(5, 2);
+                if ((present >> 2) & 1) t.y = val(6, 3);
+                if ((present >> 3) & 1) t.dir = val(7, 4);
+                o.teleports.push_back(t);
+                std::snprintf(tmp, sizeof(tmp), "blk%d: TeleportNPC %d -> (%d,%d) dir %d",
+                              pc, t.id, t.x, t.y, t.dir);
+                o.log.push_back(tmp);
+                break;
+            }
+            case 0x21: {                                     // SetNPCVisible (chara flag 0x400)
+                int id = b.size() > 1 ? b[1] : 0;
+                int on = b.size() > 2 ? (b[2] != 0) : 0;
+                o.visibles.emplace_back(id, on);
+                std::snprintf(tmp, sizeof(tmp), "blk%d: SetNPCVisible %d %s", pc, id, on ? "on" : "off");
+                o.log.push_back(tmp);
+                break;
+            }
+            case 0x2a: {                                     // SetFade(mode, type, RGBA, dur, wait)
+                if (b.size() < 10) break;
+                o.fadeMode = b[1];
+                o.fadeR = b[3]; o.fadeG = b[4]; o.fadeB = b[5];
+                o.fadeTicks = rdW(b, 7);
+                o.fadeWait = b[9] != 0;
+                std::snprintf(tmp, sizeof(tmp), "blk%d: SetFade mode=%d dur=%d%s", pc,
+                              o.fadeMode, o.fadeTicks, o.fadeWait ? " (wait)" : "");
+                o.log.push_back(tmp);
+                if (o.fadeWait) {                            // ctx wait mode 3 in the original
+                    o.waitTicks = o.fadeTicks > 0 ? o.fadeTicks : 1;
+                    o.pauseBlock = pc + 1; o.pauseEv = &ev;
+                    return;
+                }
+                break;
+            }
+            case 0x55: {                  // MovePlayer: mask + 5 BE words (layer,x,y,dir,extra)
+                int mask = (b.size() > 1) ? b[1] : 0;
+                long px = ind(st, rdW(b, 4), mask, 1);
+                long py = ind(st, rdW(b, 6), mask, 2);
+                long pd = ind(st, rdW(b, 8), mask, 3);
+                o.playerX = (int)px; o.playerY = (int)py; o.playerDir = (int)pd;
+                o.hasPlayerSet = true;
+                std::snprintf(tmp, sizeof(tmp), "blk%d: MovePlayer -> (%d,%d) dir %d",
+                              pc, o.playerX, o.playerY, o.playerDir);
+                o.log.push_back(tmp);
+                break;
+            }
+            case 0x68: {                  // StartEntityAction(id, mode, flags, n, cmds[n])
+                if (b.size() < 5) break;
+                VMActorAction a;
+                a.id = ((b[3] >> 2) & 1) ? (int)st.getVar(2, b[1]) : b[1];
+                a.mode = b[2];
+                int ncmd = b[4];
+                for (int k = 0; k < ncmd && (size_t)(5 + k) < b.size(); ++k)
+                    a.cmds.push_back(b[5 + k]);
+                std::snprintf(tmp, sizeof(tmp), "blk%d: StartEntityAction id=%d n=%d", pc, a.id, ncmd);
+                o.log.push_back(tmp);
+                o.actions.push_back(std::move(a));
+                break;
+            }
+            case 0x69: {                  // WaitEntityAction: pause until actors idle
+                o.waitActors = true;
+                o.pauseBlock = pc + 1; o.pauseEv = &ev;
+                std::snprintf(tmp, sizeof(tmp), "blk%d: WaitEntityAction (pause)", pc);
+                o.log.push_back(tmp);
+                return;
             }
             case 0x35: case 0x36: case 0x75: {               // PlayBGM family
                 o.bgm = rdW(b, 2);
@@ -208,7 +294,11 @@ static void run_event_depth(const Event& ev, ScriptState& st, const VMEnv& env,
                     run_event_depth(*callee, st, env, line, depth + 1, o);
                 else if (callee)
                     o.log.push_back("CallEvent: depth cap hit");
-                if (o.hasChoice || o.hasEncounter) return;   // callee paused (choice/battle)
+                if (o.hasChoice || o.hasEncounter || o.pauseBlock >= 0) {
+                    // callee paused: this caller must continue at pc+1 afterwards
+                    o.resumeStack.emplace_back(&ev, pc + 1);
+                    return;
+                }
                 break;
             }
             case 0x6b: {                                     // BulkSetVars
