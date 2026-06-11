@@ -39,6 +39,10 @@
 - `bankOf()` assumes bank = map group `g{N}`; fine for current data, but `msgBank` system var (type 5 idx 0) exists precisely to override this — script writes to it are stored and ignored.
 **Resolution:** Each is either a TODO hook (keep, but tracked here) or deletable; decide per item during the next refactor.
 
-## 8. Self-test claims vs binary truth
+## 8. Spawn-fallback order bug (FIXED 2026-06-10)
+**Problem:** `main.cpp loadInto` applied the map-center fallback to X *before* checking the FFM header spawn, so map-default spawns never applied to X (Y was correct). New Game on m0 (5×5) landed at (2,1) instead of (1,1) — inside the *dark-world intro* boot-7 dispatcher — playing Nacht's cutscene chain instead of the prologue. Found by Jack on Windows; the headless `--walk` path uses the top-level load (correct order), which is why sandbox traces never caught it.
+**Resolution:** order fixed; lesson recorded in testing_strategy (self-tests must cover the `loadInto` path, not just the top-level load).
+
+## 9. Self-test claims vs binary truth
 **Problem:** Docs say "battlesim/menutest/... all green" as of 2026-06-10; nothing in-repo runs them automatically.
 **Resolution:** Add a CI-able script (see testing_strategy.md). Until then, treat "all green" claims as snapshots of a manual run.

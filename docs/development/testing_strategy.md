@@ -24,3 +24,4 @@
 3. **Real-data VM fixtures**: extract 3–5 event scripts (door warp, choice, appear-gated NPC, the m0 auto chain) as hex into `--vmtest`-style assertions so VM regressions surface without a bundle.
 4. **Golden trace harness** (when emulator access exists): scripted input → per-frame position log on both engines; the roadmap already specifies this. Until then, mark movement timing LOW confidence.
 5. **Battle exact-match table**: once `SetJobStatus` is decoded, a fixture of (attacker stats, defender stats, seed) → damage from the original formula, asserted in C++.
+6. **Cover both map-load paths.** The 2026-06-10 spawn bug lived only in `loadInto` (warp/New Game/Continue path) while every headless trace used the top-level load. Any future spawn/position test must run through `loadInto` — e.g. a `--newgametest` that drives Title→Intro→start map and asserts the player tile.

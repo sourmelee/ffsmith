@@ -367,9 +367,14 @@ int main(int argc, char** argv) {
         if (!nfb.valid()) return false;
         m = std::move(nm); fb = std::move(nfb);
         int t = (m.w > 0) ? fb.w / m.w : 32;
-        if (sc < 0) sc = m.w / 2; else if (sc >= m.w) sc = m.w - 1;
+        // Map-default spawn (FFM4 header) must be consulted BEFORE the
+        // center fallback. The old order applied the center to X first,
+        // which put New Game on m0 at (2,1) instead of (1,1) — landing in
+        // the WRONG boot-7 intro dispatcher (the dark-world/Nacht chain
+        // instead of the light-side prologue). Found by Jack 2026-06-10.
         if (sc < 0 && m.spawn_x >= 0 && m.spawn_x < m.w) sc = m.spawn_x;   // FFM4 map default
         if (sr < 0 && m.spawn_y >= 0 && m.spawn_y < m.h) sr = m.spawn_y;
+        if (sc < 0) sc = m.w / 2; else if (sc >= m.w) sc = m.w - 1;
         if (sr < 0) sr = m.h / 2; else if (sr >= m.h) sr = m.h - 1;
         field = std::make_unique<Field>(&m, t, sc, sr);
         if (host) { host->setField(field.get(), fb); host->setOverhead(compose_range(bundle, m, m.overhead_threshold + 1, m.n_layers, false)); host->loadText(bundle, bankOf(key)); }
