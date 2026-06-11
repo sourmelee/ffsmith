@@ -40,5 +40,5 @@ An event's script is a list of **length-prefixed blocks**; block 0 is the entry.
 
 ## Known gaps (the current frontier)
 
-- `0x50 ScriptEncount` — scripted battles log-skip; the retail intro chain stops at the prologue battle.
+- ~~`0x50 ScriptEncount`~~ implemented 2026-06-10: pauses like a choice (`VMOut.hasEncounter` + resume block), Host fights the formation, `Field::resumeAfterBattle` continues; result via GetReference target 8. `--enctest` verifies on real bank-0 data. Open: `bsc.dat` battle scripts, condition-flag table values.
 - Common parallels 0x102/0x105/0x106 not pumped; `GetReference` targets chara/event/etc. stubbed (return 0, logged); page register (0xe474) semantics partial; choice-line text source provisional (option value used as msg id); NameInput, fades, NPC-move ops log-skip.

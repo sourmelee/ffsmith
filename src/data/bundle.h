@@ -24,6 +24,10 @@ struct Event {
     std::vector<std::vector<uint8_t>> scripts;  // length-split bytecode blocks
 };
 
+// FFM5: random-encounter area (LoadMapInfo tail -> LoadEncountData c:119075).
+// set_id = formation id in the map's story-bank section of encounters.bin.
+struct EncArea { int set_id = 0, rate = 0, x = 0, y = 0, w = 0, h = 0; };
+
 struct FfMap {
     int w = 0, h = 0, n_layers = 0;
     int mc_slot0 = -1, var_slot0 = 0;
@@ -36,6 +40,7 @@ struct FfMap {
     std::vector<uint8_t> event;     // raw event region (legacy; events[] is structured)
     std::vector<uint8_t> pass;      // per-cell 4-dir pass nibble (0 = solid)
     std::vector<Event> events;      // structured NPCs/triggers (FFM2)
+    std::vector<EncArea> enc_areas; // random-encounter areas (FFM5)
     bool valid() const { return w > 0 && h > 0; }
 };
 
@@ -63,8 +68,23 @@ struct CharRec { int id = 0; std::string name; int equip[6] = {0,0,0,0,0,0};
                  int job = 0, level = 1, str = 0, spd = 0, vit = 0, intl = 0, mnd = 0, hp = 0, mp = 0, chpk = 0; };
 std::vector<Item>    load_items(const std::string& path);   // data/items.bin
 std::vector<CharRec> load_chars(const std::string& path);   // data/chars.bin
-struct Monster { int id = 0; std::string name; int hp = 0, atk = 0, def = 0, level = 1; long exp = 0, gil = 0; };
-std::vector<Monster> load_monsters(const std::string& path);  // data/monsters.bin
+// Monster combat stats (FMN2; GameClass::LoadMonsterData c:151254 +
+// SetBtlEnemyParam c:88427): atk = weapon-attack body[15]; the enemy's
+// attack STAT (BTLACT+0x3c) is its LEVEL; MP = HP/8.
+struct Monster { int id = 0; std::string name; int hp = 0, atk = 0, def = 0, level = 1; long exp = 0, gil = 0;
+                 int mdef = 0, eva = 0, meva = 0, amin = 0, amax = 0; };
+std::vector<Monster> load_monsters(const std::string& path);  // data/monsters.bin (FMON or FMN2)
+
+// Battle formations (form.bin via data/encounters.bin "FENC";
+// BattleClass::LoadFormation c:103535).
+struct FormEnemy { int id = 0, x = 0, y = 0, flags = 0; };
+struct Formation {
+    int id = -1, noEscape = 0, bsc = -1;   // bsc = battle-script id (bsc.dat; unimplemented)
+    std::vector<FormEnemy> enemies;
+    bool valid() const { return id >= 0; }
+};
+// bank -> formation id -> record
+std::unordered_map<int, std::unordered_map<int, Formation>> load_encounters(const std::string& path);
 
 struct LevelTable {                              // data/levels.bin (EXP thresholds + HP/MP growth)
     std::vector<uint32_t> thr;                   // thr[i] = cumulative EXP to reach level i+1

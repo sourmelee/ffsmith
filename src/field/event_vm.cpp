@@ -166,6 +166,31 @@ static void run_event_depth(const Event& ev, ScriptState& st, const VMEnv& env,
                 o.log.push_back(tmp);
                 break;
             }
+            case 0x50: {                  // ScriptEncount (FieldClass::ScriptEncount c:120371)
+                // Seven (flag u8, BE u16) pairs; flag != 0 resolves the word
+                // through GetReferenceIndex (script-var indirection, bank 2 —
+                // same idiom as 0x41's mask).
+                auto refIdx = [&](size_t fo, size_t wo) -> int {
+                    int w = rdW(b, wo);
+                    w = (w ^ 0x8000) - 0x8000;               // GetBuffToWord = signed short
+                    return (fo < b.size() && b[fo]) ? (int)st.getVar(2, w) : w;
+                };
+                o.enc.formation = refIdx(1, 2);
+                o.enc.bgId      = refIdx(4, 5);
+                o.enc.bgVar     = refIdx(7, 8);
+                o.enc.condition = refIdx(10, 0xb);
+                o.enc.bgm       = refIdx(0xd, 0xe);
+                o.enc.bgmCmp    = refIdx(0x10, 0x11);
+                o.enc.flags     = refIdx(0x13, 0x14);
+                o.enc.resumeBlock = pc + 1;
+                o.enc.ev = &ev;
+                o.hasEncounter = true;
+                std::snprintf(tmp, sizeof(tmp),
+                              "blk%d: ScriptEncount formation=%d cond=%d bgm=%d",
+                              pc, o.enc.formation, o.enc.condition, o.enc.bgm);
+                o.log.push_back(tmp);
+                return;                                      // pause for the battle
+            }
             case 0x57:                                       // ScriptEnd (registry mode 4)
                 o.sawEnd = true;
                 o.log.push_back("ScriptEnd");
@@ -183,7 +208,7 @@ static void run_event_depth(const Event& ev, ScriptState& st, const VMEnv& env,
                     run_event_depth(*callee, st, env, line, depth + 1, o);
                 else if (callee)
                     o.log.push_back("CallEvent: depth cap hit");
-                if (o.hasChoice) return;                     // callee paused on a choice
+                if (o.hasChoice || o.hasEncounter) return;   // callee paused (choice/battle)
                 break;
             }
             case 0x6b: {                                     // BulkSetVars

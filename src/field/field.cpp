@@ -113,7 +113,7 @@ void Field::rescanParallel() {
 }
 
 void Field::pumpAuto() {
-    if (dlgActive_ || choiceActive_ || warp_.valid() || autoQueue_.empty()) return;
+    if (dlgActive_ || choiceActive_ || warp_.valid() || pendingEnc_.valid() || autoQueue_.empty()) return;
     const Event* e = autoQueue_.front();
     autoQueue_.erase(autoQueue_.begin());
     if (!appears(*e) || !canAutoRun(e)) return;
@@ -152,6 +152,24 @@ void Field::runScript(const Event* e, int startBlock) {
         warp_ = {o.warpMap, o.warpX, o.warpY, o.warpDir};
         std::printf("[FFSmith] script warp -> map %d @(%d,%d)\n", o.warpMap, o.warpX, o.warpY);
     }
+    if (o.hasEncounter) {
+        pendingEnc_ = o.enc;
+        if (!pendingEnc_.ev) pendingEnc_.ev = e;
+        encLaunched_ = false;
+        std::printf("[FFSmith] script encounter -> formation %d (resume blk %d)\n",
+                    pendingEnc_.formation, pendingEnc_.resumeBlock);
+    }
+}
+
+// The battle is over: continue the paused script at the block after 0x50.
+// The script can read the result via GetReference target 8 (env.battleRef).
+void Field::resumeAfterBattle() {
+    if (!pendingEnc_.valid()) return;
+    const Event* e = pendingEnc_.ev;
+    int blk = pendingEnc_.resumeBlock;
+    pendingEnc_ = VMEncounter{};
+    encLaunched_ = false;
+    if (e && blk >= 0) runScript(e, blk);
 }
 
 void Field::confirm() {

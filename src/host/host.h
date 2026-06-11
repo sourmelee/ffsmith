@@ -8,6 +8,7 @@
 #include "data/bundle.h"
 #include "audio/audio.h"
 #include "field/script_state.h"
+#include "field/event_vm.h"
 
 struct SDL_Window;
 struct SDL_Renderer;
@@ -67,6 +68,9 @@ public:
     bool consumeSaveRequest() { bool b = saveReq_; saveReq_ = false; return b; }
     bool consumeLoadRequest() { bool b = loadReq_; loadReq_ = false; return b; }
     void startBattle(int monsterId);
+    void startFormationBattle(const VMEncounter& enc);  // 0x50 scripted battle
+    void setRandomEncounters(bool b) { encountersOn_ = b; }
+    void selfTestEncounter();    // headless: 0x50 pause -> battle -> resume
     void newGame();
     void selfTestItemUse();      // headless: damage a member, use a Potion, report
     void selfTestEquip();        // headless: swap a weapon, report stat + inventory change
@@ -193,6 +197,16 @@ private:
     std::vector<CharRec> chars_;
     int menuPage_ = 0, pageCursor_ = 0, pageScroll_ = 0, pageChar_ = 0;
     std::vector<Monster> monsters_;
+    // Scripted battles (ScriptEncount) + formation data (encounters.bin).
+    std::unordered_map<int, std::unordered_map<int, Formation>> encounters_;
+    bool scriptBattle_ = false;      // current battle was script-launched
+    bool battleNoEscape_ = false;    // formation no_escape -> Run always fails
+    int  battleOutcome_ = 1;         // 1 win, 0 loss, 2 escaped (GetReferenceBattle t3)
+    int  lastBattleResult_ = 0;      // exposed to scripts via env.battleRef
+    bool encountersOn_ = false;      // --encounters: random-encounter stepping (approx roll)
+    int  lastEncCell_ = -1;
+    void maybeRandomEncounter();
+    int  currentBank() const;        // story bank = map group ("g%d" of mapKey_)
     std::vector<Combatant> enemies_;
     int target_ = 0, enemyActor_ = 0;
     std::vector<Combatant> party_;

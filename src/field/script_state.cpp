@@ -163,6 +163,7 @@ long get_reference(const ScriptState& st, const VMEnv& env,
         case 3:  return st.getVar(type, (int)idx);
         case 5:  return (env.partyHas && env.partyHas((int)idx)) ? 1 : 0;
         case 7:  return env.itemCount ? env.itemCount((int)idx) : 0;
+        case 8:  return env.battleRef ? env.battleRef(type, idx) : 0;  // GetReferenceBattle
         case 9: case 10: return idx;                       // immediate constant
         case 0xf: {                                        // random in [type, idx)
             long span = (idx - type) * 10;

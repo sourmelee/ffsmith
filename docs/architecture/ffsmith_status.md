@@ -4,7 +4,7 @@
 
 ## Maturity summary
 
-FFSmith is **~10 days old and already plays a vertical slice of the real game**: title menu → New Game → intro cinematics → the retail opening cutscene chain (m0 → m101 → m100 → m101 → m200 → m1 → m300, ending at the scripted prologue battle) → walkable fields with real tiles/collision/sprites/animation/z-order → menus (Item/Equip/Status with real data and working actions) → turn-based ATB battles with real stats, rewards, level-ups → save/load. It is **not** yet playable through the story: the scripted-battle hand-off (`0x50 ScriptEncount`), random encounters, AP/abilities, shops, and the perspective world-map renderer are missing.
+FFSmith is **~10 days old and already plays a vertical slice of the real game**: title menu → New Game → intro cinematics → the retail opening cutscene chain (m0 → m101 → m100 → m101 → m200 → m1 → m300, ending at the scripted prologue battle) → walkable fields with real tiles/collision/sprites/animation/z-order → menus (Item/Equip/Status with real data and working actions) → turn-based ATB battles with real stats, rewards, level-ups → save/load. Since the 2026-06-10 battle-RE pass, **scripted battles work end-to-end** (`0x50` → real formation from `encounters.bin` → script resume, `--enctest` PASS) with real decoded monster stats (FMN2), and decoded random-encounter areas ship behind `--encounters` (approx roll). Still missing for story-playability: `bsc.dat` battle scripts, AP/abilities, shops, NPC movement, and the perspective world-map renderer.
 
 ## Milestone ledger
 
@@ -20,6 +20,7 @@ FFSmith is **~10 days old and already plays a vertical slice of the real game**:
 | M7 save/load | ✅ HIGH (own format) | `FSAV` v5 in `main.cpp`; round-trips verified incl. ~4 KB script-state blob. **Not** the original `save.bin` format |
 | M8 audio | ✅ MEDIUM | per-map field/battle BGM, title BGM, "decide" SE; `titleBgm_ = 18` is an unconfirmed placeholder (host.h:149) |
 | Post-M8 Event VM v2 | ✅ HIGH | branching (`0x3d` if-not-goto), flags/vars banks, appear conditions, choices (`0x3c`), CallEvent (`0x66`), auto events, common pool — `--vmtest` 11/11 |
+| Post-M8 Scripted battles (N1) | ✅ HIGH | `0x50` decoded + implemented: formation tables (FENC), real monster stats (FMN2), VM pause → battle → resume, result via GetReference t8 — `--enctest` PASS |
 
 ## What is real vs approximated
 
@@ -38,7 +39,7 @@ FFSmith is **~10 days old and already plays a vertical slice of the real game**:
 - **ATB**: gauge += SPD per step, threshold 256, random initial stagger (`pickNextActor`). Original turn scheduler not decoded.
 - **Magic**: spell knowledge = `INT≥2`/`MND≥2`, damage `power + INT·3 − def/4 ± rand(4)` — NOT the decoded `CalcMagicDmg`.
 - **Damage formula tail**: crit/element/race/status/hit-count/back-attack/defense% modifiers absent; job-derived attack stat `A` uses raw STR; enemy `W = 5 + level` is invented.
-- **Encounters**: `startBattle` picks a weak lead + difficulty-band extras (atk/hp bands). Real encounter tables (`encount_ratio` is baked but unused) not implemented. Enemy `spd = 7` fixed.
+- **Encounters**: scripted battles (0x50) now use the real formation tables; the debug **B** key still uses the old difficulty-band picker. Random-encounter areas are real data; the per-step roll is approximated (`--encounters`, default off; rate-sum/256 per new cell). Enemy ATB speed = level (decoded: BTLACT+0x40 = level for enemies) — the *player-side* turn scheduler is still the FFSmith approximation.
 - **Run** = 50% coin flip; **Defend** = damage/2.
 - **Item effects**: parsed from description text (digits → heal amount; "Knocked Out" substring → revive). The real item-effect table is undecoded.
 - **Damage floors**: drain `maxHP/16` per step — exact original amount not decoded (host.cpp:169 comment).
@@ -50,8 +51,9 @@ FFSmith is **~10 days old and already plays a vertical slice of the real game**:
 - **Boot conditions 2/3**: treated as step triggers "pending their trigger-type RE" (field.cpp:29).
 
 ### Missing entirely
-- `0x50 ScriptEncount` scripted-battle hand-off + post-battle script resume (the current frontier; intro chain stops here).
-- Random encounters, AP/ability learning, status effects, elemental/crit modifiers, shops, NameInput UI, fades/palette ops, NPC scripted movement (`MoveCharaEvent`) and autonomous walk (`MoveCharaAuto`) — NPCs render statically.
+- ~~`0x50 ScriptEncount`~~ **DONE 2026-06-10**: scripted battles pause the VM, fight the real formation (encounters.bin, FENC), resume the script with the result readable via GetReference target 8 (`--enctest` PASS). Still missing within battles: `bsc.dat` battle scripts, formation x/y placement rendering, per-formation loss handling (scripted losses currently revive-to-1HP and resume — flagged approximation).
+- Random encounters: decoded areas ship in FFM5 and a flag-gated approximation roll exists (`--encounters`, default off) — the original roll formula is still open.
+- AP/ability learning, status effects, elemental/crit modifiers, shops, NameInput UI, fades/palette ops, NPC scripted movement (`MoveCharaEvent`) and autonomous walk (`MoveCharaAuto`) — NPCs render statically.
 - Common parallels (0x102/0x105/0x106…), page register (0xe474) full semantics, op 0x32 message-wait.
 - Perspective/tilted world-map renderer + Far background (m1 flyover renders flat); FFD title-logo asset (bundle ships the FFL logo).
 - Original save format (`GameClass::SaveGameData` → `save.bin`, 15 KB/slot) — FFSmith uses its own `FSAV`.
@@ -59,7 +61,7 @@ FFSmith is **~10 days old and already plays a vertical slice of the real game**:
 
 ## Open questions blocking the next milestones
 
-1. **ScriptEncount semantics** — formation id source, post-battle destination (common 0x101 path observed → m150). Frontier as of 2026-06-10 roadmap status.
+1. ~~ScriptEncount semantics~~ **RESOLVED + implemented 2026-06-10** (formations/areas/result decoded; see Python/docs/formats/battles.md). New frontier within battles: `bsc.dat` battle-script VM and the original encounter roll.
 2. **Real turn scheduler / RNG** — original PRNG unidentified (roadmap Part 6 risk; needed before battle exact-match).
 3. **Job stat derivation** (`SetJobStatus`) — required for damage exact-match; BTLACT map exists, derivation doesn't.
 4. **Timing model** — assumed 60 Hz frame-locked; never confirmed against the original (roadmap Part 6 risk, still open).

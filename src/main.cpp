@@ -45,6 +45,7 @@ static void printUsage(const char* exe) {
         "  --menu         open the field menu (for screenshots)\n"
         "  --debug        boot into the debug launcher (default for windowed)\n"
         "  --noclip/--overlay/--hud   field debug toggles (for screenshots)\n"
+        "  --encounters   enable random encounters (decoded areas, approx roll)\n"
         "  --hz N         logic tick rate (default 60)\n"
         "  --help         show this help\n"
         "Controls: arrows/WASD move, Z confirm, Enter/Tab menu, X cancel, Esc quit. Resizable.\n", exe);
@@ -263,6 +264,7 @@ int main(int argc, char** argv) {
     int menuPageFlag = 0, battleMon = -1, battleSim = -1;
     bool spellTest = false, saveFlag = false, loadFlag = false, itemTest = false, equipTest = false;
     int animTick = 0; bool dmgTest = false, noOverhead = false, levelTest = false, reviveTest = false, menuTest = false; int introBeat = -1;
+    bool encTest = false, encountersOn = false;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
         if      (!std::strcmp(a, "--bundle")) bundle = takeStr(argc, argv, i, "");
@@ -289,6 +291,8 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--leveltest")) levelTest = true;
         else if (!std::strcmp(a, "--revivetest")) reviveTest = true;
         else if (!std::strcmp(a, "--menutest")) menuTest = true;
+        else if (!std::strcmp(a, "--enctest")) encTest = true;
+        else if (!std::strcmp(a, "--encounters")) encountersOn = true;
         else if (!std::strcmp(a, "--vmtest")) return vmSelfTest();
         else if (!std::strcmp(a, "--setflag")) setFlags.push_back(takeStr(argc, argv, i, ""));
         else if (!std::strcmp(a, "--intro")) introBeat = takeInt(argc, argv, i, 0);
@@ -395,6 +399,16 @@ int main(int argc, char** argv) {
         };
         field->setScript(&walkState, &walkEnv);
         field->enterMap();
+        static long walkBattleResult = 1;                 // walk traces auto-win battles
+        walkEnv.battleRef = [](int type, long) -> long { return type == 3 ? walkBattleResult : 0; };
+        auto pumpEnc = [&]() {
+            if (field->encounterPending()) {
+                VMEncounter enc = field->startEncounter();
+                std::printf("  >> SCRIPTED BATTLE formation %d (auto-win, resuming)\n", enc.formation);
+                walkBattleResult = 1;
+                field->resumeAfterBattle();
+            }
+        };
         auto wireWalk = [&]() { field->setScript(&walkState, &walkEnv); field->enterMap(); };
         std::printf("[FFSmith] walk trace from (%d,%d) on %dx%d map:\n", startCol, startRow, m.w, m.h);
         for (char ch : walk) {
@@ -402,6 +416,7 @@ int main(int argc, char** argv) {
                 InputState cin; cin.pressed = BTN_CONFIRM; field->update(cin);
                 std::printf("  C -> dlg=%d msg=%d choice=%d\n",
                             (int)field->inDialogue(), field->dialogueMsg(), (int)field->choiceActive());
+                if (!field->inDialogue()) pumpEnc();
                 Warp cw = field->consumeWarp();
                 if (cw.valid()) {
                     std::string key = find_map_key(bundle, cw.map);
@@ -415,6 +430,7 @@ int main(int argc, char** argv) {
             }
             if (ch == '.') {                            // idle frame (pump autos)
                 InputState nin; field->update(nin);
+                if (!field->inDialogue()) pumpEnc();
                 Warp iw = field->consumeWarp();
                 if (iw.valid()) {
                     std::string key = find_map_key(bundle, iw.map);
@@ -494,6 +510,8 @@ int main(int argc, char** argv) {
     if (levelTest) { host.selfTestLevel(); return 0; }
     if (reviveTest) { host.selfTestRevive(); return 0; }
     if (menuTest) { host.selfTestMenu(); return 0; }
+    if (encTest) { host.setMapKey(map); host.selfTestEncounter(); return 0; }
+    if (encountersOn) host.setRandomEncounters(true);
     if (saveFlag) { writeSave(bundle, map, startCol, startRow, face < 0 ? 0 : face, playerImg, host); return 0; }
     host.debugSelectMap(map);
     host.setMapKey(map);

@@ -204,6 +204,10 @@ void Host::wireScriptEnv() {
         return false;
     };
     vmEnv_.rand = [](int n) { return n > 0 ? (int)(std::rand() % n) : 0; };
+    // GetReferenceBattle (c:135841) type 3: 1 = won, 2 = escaped, 0 = lost.
+    vmEnv_.battleRef = [this](int type, long) -> long {
+        return type == 3 ? lastBattleResult_ : 0;
+    };
     vmEnv_.findEvent = [this](int id) -> const Event* {
         if (field_)
             for (const auto& e : field_->map()->events) if (e.id == id) return &e;
@@ -436,7 +440,14 @@ void Host::update(double /*dt*/) {
         updateMenu(input_);
     } else if (field_) {
         if (input_.pressed & BTN_MENU) { menuOpen_ = true; menuCursor_ = 0; }
-        else { field_->update(input_); checkFieldHazard(); }
+        else {
+            field_->update(input_);
+            checkFieldHazard();
+            if (encountersOn_) maybeRandomEncounter();
+        }
+        // a script hit 0x50: show its text first, then hand off to battle
+        if (!field_->inDialogue() && field_->encounterPending())
+            startFormationBattle(field_->startEncounter());
     }
     ++tick_count_;
     if (cfg_.max_frames >= 0 && static_cast<int>(tick_count_) >= cfg_.max_frames) running_ = false;
@@ -868,6 +879,9 @@ bool Host::loadMenuData(const std::string& dir) {
     spells_ = load_spells(dir + "/data/spells.bin");
     levels_ = load_levels(dir + "/data/levels.bin");
     spriteGeo_ = load_spritegeo(dir + "/data/spritegeo.bin");
+    encounters_ = load_encounters(dir + "/data/encounters.bin");
+    { size_t nf = 0; for (auto& kv : encounters_) nf += kv.second.size();
+      std::printf("[FFSmith] encounters: %zu banks / %zu formations\n", encounters_.size(), nf); }
     if (!audio_.ok()) { audio_.init(dir); audio_.setBgmVolume(0.65f); audio_.setSeVolume(0.85f); }
     Texture bg = load_tex(dir + "/ui/btlbg.tex");
     if (bg.valid() && renderer_) {
@@ -1121,6 +1135,171 @@ void Host::endBattle() {                                    // persist battle HP
         gameParty_[i].mp = std::max(0, party_[i].mp);
     }
     mode_ = Mode::Field;
+    if (scriptBattle_) {
+        scriptBattle_ = false; battleNoEscape_ = false;
+        lastBattleResult_ = battleOutcome_;
+        // Scripted-battle defeat must not strand the script (the prologue
+        // battle is a scripted loss): revive the party to 1 HP and resume.
+        // APPROXIMATION: the original's loss handling per-formation is not
+        // yet decoded (battle scripts in bsc.dat may control this).
+        if (battleOutcome_ == 0)
+            for (auto& gm : gameParty_) if (gm.hp <= 0) gm.hp = 1;
+        if (field_) field_->resumeAfterBattle();
+    }
+    battleOutcome_ = 1;
+}
+
+int Host::currentBank() const {
+    int g = 0;
+    std::sscanf(mapKey_.c_str(), "g%d", &g);
+    return g;
+}
+
+// 0x50 ScriptEncount hand-off: look the formation up in the current story
+// bank's table and fight it; resume the script when the battle ends.
+void Host::startFormationBattle(const VMEncounter& enc) {
+    const Formation* fm = nullptr;
+    auto bi = encounters_.find(currentBank());
+    if (bi != encounters_.end()) {
+        auto fi = bi->second.find(enc.formation);
+        if (fi != bi->second.end()) fm = &fi->second;
+    }
+    if (!fm || fm->enemies.empty()) {
+        std::printf("[FFSmith] formation %d (bank %d) not found -> skipping battle\n",
+                    enc.formation, currentBank());
+        lastBattleResult_ = 1;
+        if (field_) field_->resumeAfterBattle();
+        return;
+    }
+    enemies_.clear(); rewardsGiven_ = false;
+    for (const auto& fe : fm->enemies) {
+        const Monster* m = nullptr;
+        for (const auto& mm : monsters_) if (mm.id == fe.id) { m = &mm; break; }
+        if (!m) continue;
+        Combatant e;
+        e.name = m->name; e.hp = e.maxhp = m->hp;
+        e.wpn = std::max(1, m->atk);      // W = weapon-attack (monster body[15])
+        e.atk = std::max(1, m->level);    // A = LEVEL (SetBtlEnemyParam: BTLACT+0x3c)
+        e.def = std::max(0, m->def);      // D (body[18])
+        e.level = m->level;
+        e.spd = std::max(1, m->level);    // BTLACT+0x40 (SPD-class) = level for enemies
+        e.mp = e.maxmp = m->hp / 8;       // enemy MP = HP/8 (SetBtlEnemyParam)
+        e.exp = m->exp; e.gil = m->gil;
+        enemies_.push_back(e);
+    }
+    if (enemies_.empty()) {
+        lastBattleResult_ = 1;
+        if (field_) field_->resumeAfterBattle();
+        return;
+    }
+    std::unordered_map<std::string, int> total, idx;          // Goblin A / B
+    for (auto& e : enemies_) total[e.name]++;
+    for (auto& e : enemies_) {
+        std::string base = e.name;
+        if (total[base] > 1) { e.name = base + " " + std::string(1, char('A' + idx[base])); idx[base]++; }
+    }
+    party_.clear();
+    if (gameParty_.empty()) newGame();
+    for (size_t gi = 0; gi < gameParty_.size(); ++gi) {
+        const GameMember& gm = gameParty_[gi];
+        if (gm.charIdx < 0 || gm.charIdx >= (int)chars_.size()) continue;
+        const CharRec& c = chars_[gm.charIdx];
+        int weaponAtk = (gm.equip[0] > 0 && items_.count(gm.equip[0])) ? items_[gm.equip[0]].atk : 0;
+        int armorDef = 0;
+        for (int k = 0; k < 6; ++k) if (gm.equip[k] > 0 && items_.count(gm.equip[k])) armorDef += items_[gm.equip[k]].def;
+        Combatant cb;
+        cb.name = c.name;
+        cb.maxhp = memberMaxHp((int)gi);
+        cb.hp = std::max(0, std::min(gm.hp, cb.maxhp));
+        cb.maxmp = memberMaxMp((int)gi); cb.mp = std::max(0, std::min(gm.mp, cb.maxmp));
+        cb.atk = std::max(1, c.str);
+        cb.wpn = std::max(3, weaponAtk);
+        cb.def = std::max(1, c.vit + armorDef + c.level / 2);
+        cb.level = gm.level > 0 ? gm.level : c.level; cb.spd = std::max(1, c.spd);
+        cb.intl = c.intl; cb.mnd = c.mnd;
+        party_.push_back(cb);
+    }
+    if (party_.empty()) { Combatant cb; cb.name = "Hero"; cb.hp = cb.maxhp = 34; cb.atk = 13; cb.wpn = 6; cb.def = 6; party_.push_back(cb); }
+    scriptBattle_ = true;
+    battleNoEscape_ = (fm->noEscape != 0);
+    battleOutcome_ = 1;
+    if (enc.bgm >= 0) audio_.playBgm(enc.bgm);
+    else if (field_ && field_->map() && field_->map()->battle_bgm != 255)
+        audio_.playBgm(field_->map()->battle_bgm);
+    target_ = firstLivingEnemy(0); enemyActor_ = 0;
+    for (auto& c : party_)   c.atb = std::rand() % 256;
+    for (auto& e : enemies_) e.atb = std::rand() % 256;
+    btlCmd_ = 0; btlMsg_.clear();
+    mode_ = Mode::Battle;
+    beginNextTurn();
+    std::printf("[FFSmith] scripted battle: formation %d (bank %d), %zu enemies%s\n",
+                enc.formation, currentBank(), enemies_.size(),
+                battleNoEscape_ ? " [no escape]" : "");
+}
+
+// Random encounters (--encounters). The per-map encounter AREAS and their
+// formation ids are decoded data (FFM5); the per-step ROLL is an
+// APPROXIMATION (the original's step/ratio formula is not yet decoded):
+// chance per new cell = sum(rates of covering areas) / 256, area picked
+// weighted by rate.
+void Host::maybeRandomEncounter() {
+    if (!field_ || mode_ != Mode::Field) return;
+    const FfMap* mp = field_->map();
+    if (!mp || mp->enc_areas.empty() || field_->moving()) return;
+    int cell = field_->row() * mp->w + field_->col();
+    if (cell == lastEncCell_) return;
+    lastEncCell_ = cell;
+    int cx = field_->col(), cy = field_->row();
+    int totalRate = 0;
+    std::vector<const EncArea*> covering;
+    for (const auto& a : mp->enc_areas)
+        if (cx >= a.x && cx < a.x + a.w && cy >= a.y && cy < a.y + a.h) {
+            covering.push_back(&a); totalRate += std::max(0, a.rate);
+        }
+    if (covering.empty() || totalRate <= 0) return;
+    if (std::rand() % 256 >= totalRate) return;
+    int pick = std::rand() % totalRate;
+    const EncArea* chosen = covering.back();
+    for (const EncArea* a : covering) { pick -= std::max(0, a->rate); if (pick < 0) { chosen = a; break; } }
+    VMEncounter enc;
+    enc.formation = chosen->set_id;
+    std::printf("[FFSmith] random encounter: area set %d @(%d,%d)\n", chosen->set_id, cx, cy);
+    startFormationBattle(enc);
+    scriptBattle_ = false;            // random battles don't resume a script
+}
+
+void Host::selfTestEncounter() {
+    if (gameParty_.empty()) newGame();
+    if (!field_) { std::printf("[enctest] no field\n"); return; }
+    auto hexblk = [](const char* hx) {
+        std::vector<uint8_t> v;
+        for (const char* q = hx; q[0] && q[1]; q += 2) {
+            auto nib = [](char c) { return c <= '9' ? c - '0' : (c | 32) - 'a' + 10; };
+            v.push_back((uint8_t)((nib(q[0]) << 4) | nib(q[1])));
+        }
+        return v;
+    };
+    static Event ev;                                  // outlives the battle
+    ev.scripts.clear();
+    // blk0: 0x50 formation 1 (imm), bg 0/0, cond 0, bgm -1/-1, flags 1
+    ev.scripts.push_back(hexblk("50" "000001" "000000" "000000" "000000" "00ffff" "00ffff" "000001"));
+    ev.scripts.push_back(hexblk("0400000000050001"));  // blk1 (resume): set flag0[5]
+    ev.scripts.push_back(hexblk("57"));
+    field_->debugRunEvent(&ev);
+    std::printf("[enctest] pending=%d\n", (int)field_->encounterPending());
+    if (!field_->encounterPending()) { std::printf("[enctest] FAIL: no pending encounter\n"); return; }
+    startFormationBattle(field_->startEncounter());
+    if (mode_ != Mode::Battle) { std::printf("[enctest] battle skipped (formation missing?)\n"); }
+    else {
+        InputState c; c.pressed = BTN_CONFIRM;
+        int guard = 0;
+        while (mode_ == Mode::Battle && guard++ < 800) updateBattle(c);
+        std::printf("[enctest] battle done in %d steps, outcome=%d\n", guard, lastBattleResult_);
+    }
+    bool resumed = scriptState_.getFlag(0, 5) != 0;
+    long ref = vmEnv_.battleRef ? vmEnv_.battleRef(3, 0) : -1;
+    std::printf("[enctest] %s (resume flag0[5]=%d, battleRef t3=%ld)\n",
+                resumed ? "PASS" : "FAIL", (int)resumed, ref);
 }
 
 void Host::selfTestLevel() {
@@ -1302,11 +1481,14 @@ void Host::startBattle(int leadId) {
     if (field_ && field_->map() && field_->map()->battle_bgm != 255)
         audio_.playBgm(field_->map()->battle_bgm);   // battle theme; field BGM restored on endBattle (poll)
     auto push = [&](const Monster* m) {
+        // Decoded enemy mapping (SetBtlEnemyParam c:88427): W = weapon-attack
+        // (body[15], baked as m->atk), A = LEVEL, D = body[18], SPD-class = level.
         Combatant e; e.name = m->name; e.hp = e.maxhp = m->hp;
-        e.atk = std::max(1, m->atk);      // A = monster attack stat (BTLACT 0x3c)
-        e.wpn = 5 + m->level;             // W = small innate weapon power (no equipment)
-        e.def = std::max(1, m->def);      // D (BTLACT 0x58)
-        e.level = m->level; e.spd = 7;
+        e.wpn = std::max(1, m->atk);
+        e.atk = std::max(1, m->level);
+        e.def = std::max(0, m->def);
+        e.level = m->level; e.spd = std::max(1, m->level);
+        e.mp = e.maxmp = m->hp / 8;
         e.exp = m->exp; e.gil = m->gil;
         enemies_.push_back(e);
     };
@@ -1385,7 +1567,9 @@ void Host::updateBattle(const InputState& in) {
             } else if (btlCmd_ == 2) {                       // Defend
                 party_[btlMember_].defending = true; btlMsg_ = party_[btlMember_].name + " defends."; btlPhase_ = 1;
             } else {                                         // Run
-                if (std::rand() % 2 == 0) { endBattle(); return; }
+                if (!battleNoEscape_ && std::rand() % 2 == 0) {
+                    battleOutcome_ = 2; endBattle(); return;   // escaped
+                }
                 btlMsg_ = "Couldn't escape!"; btlPhase_ = 1;
             }
         }
@@ -1421,12 +1605,12 @@ void Host::updateBattle(const InputState& in) {
         }
     } else if (btlPhase_ == 1) {                             // resolve player action
         if (in.pressed & BTN_CONFIRM) {
-            if (!enemiesAlive()) { btlMsg_ = awardBattleRewards(); btlPhase_ = 3; return; }
+            if (!enemiesAlive()) { btlMsg_ = awardBattleRewards(); battleOutcome_ = 1; btlPhase_ = 3; return; }
             beginNextTurn();
         }
     } else if (btlPhase_ == 2) {                             // resolve enemy action
         if (in.pressed & BTN_CONFIRM) {
-            if (!partyAlive()) { btlMsg_ = "Party wiped out..."; btlPhase_ = 4; return; }
+            if (!partyAlive()) { btlMsg_ = "Party wiped out..."; battleOutcome_ = 0; btlPhase_ = 4; return; }
             beginNextTurn();
         }
     } else {                                                 // 3 win / 4 lose

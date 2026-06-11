@@ -61,6 +61,13 @@ public:
     const Event* stepTriggerAt(int c, int r) const;  // step/range trigger at a tile
     void enterMap();                             // fire on-load autos (boot 4/5/0 + boot-7 rect)
 
+    // Scripted battles (0x50 ScriptEncount): the VM pauses; the host starts
+    // the battle, then resumeAfterBattle() continues the script.
+    bool encounterPending() const { return pendingEnc_.valid() && !encLaunched_; }
+    VMEncounter startEncounter() { encLaunched_ = true; return pendingEnc_; }
+    void resumeAfterBattle();                    // run the paused script's resume block
+    void debugRunEvent(const Event* e) { runScript(e, 0); }   // self-tests
+
 private:
     void runScript(const Event* e, int startBlock);   // run VM + absorb VMOut
     void choiceMove(int d);
@@ -90,6 +97,8 @@ private:
     VMChoice choice_;
     int choiceSel_ = 0;
     const Event* pendingEv_ = nullptr;           // event awaiting choice resume
+    VMEncounter pendingEnc_;                     // 0x50 battle awaiting start/resume
+    bool encLaunched_ = false;
     std::vector<const Event*> autoQueue_;        // pending auto-run events
     std::vector<int> runCount_;                  // per-event auto-run count (loop guard)
     int autoBudget_ = 32;                        // total auto runs per map visit

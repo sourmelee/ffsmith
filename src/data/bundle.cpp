@@ -66,6 +66,16 @@ FfMap load_ffmap(const std::string& path) {
         m.spawn_y = (buf[o+1] == 255) ? -1 : buf[o+1];
         m.spawn_dir = buf[o+2]; o += 3;
     }
+    if (buf[3] >= '5' && o + 1 <= buf.size()) {  // FFM5: random-encounter areas
+        int na = buf[o++];
+        for (int i = 0; i < na && o + 7 <= buf.size(); ++i) {
+            EncArea a;
+            a.set_id = rd_u16(&buf[o]); a.rate = buf[o+2];
+            a.x = buf[o+3]; a.y = buf[o+4]; a.w = buf[o+5]; a.h = buf[o+6];
+            o += 7;
+            m.enc_areas.push_back(a);
+        }
+    }
     m.w = w; m.h = h; m.n_layers = nl;
     size_t cells = (size_t)w * h;
     for (int L = 0; L < nl; ++L) {
@@ -252,7 +262,9 @@ std::vector<CharRec> load_chars(const std::string& path) {
 
 std::vector<Monster> load_monsters(const std::string& path) {
     std::vector<Monster> out; auto buf = read_file(path);
-    if (buf.size() < 8 || std::memcmp(buf.data(), "FMON", 4) != 0) return out;
+    if (buf.size() < 8 || (std::memcmp(buf.data(), "FMON", 4) != 0 &&
+                           std::memcmp(buf.data(), "FMN2", 4) != 0)) return out;
+    const bool v2 = (buf[3] == '2');
     uint32_t n = rd_u32(&buf[4]); size_t o = 8;
     for (uint32_t i = 0; i < n; ++i) {
         if (o + 6 > buf.size()) break;
@@ -262,7 +274,41 @@ std::vector<Monster> load_monsters(const std::string& path) {
         if (o + 7 > buf.size()) break;
         m.hp = rd_u16(&buf[o]); m.atk = rd_u16(&buf[o + 2]); m.def = rd_u16(&buf[o + 4]); m.level = buf[o + 6]; o += 7;
         if (o + 8 <= buf.size()) { m.exp = rd_u32(&buf[o]); m.gil = rd_u32(&buf[o + 4]); o += 8; }
+        if (v2 && o + 5 <= buf.size()) {           // FMN2: mdef/eva/meva + attack-stat range
+            m.mdef = buf[o]; m.eva = buf[o+1]; m.meva = buf[o+2];
+            m.amin = buf[o+3]; m.amax = buf[o+4]; o += 5;
+        }
         out.push_back(std::move(m));
+    }
+    return out;
+}
+
+std::unordered_map<int, std::unordered_map<int, Formation>> load_encounters(const std::string& path) {
+    std::unordered_map<int, std::unordered_map<int, Formation>> out;
+    auto buf = read_file(path);
+    if (buf.size() < 5 || std::memcmp(buf.data(), "FENC", 4) != 0) return out;
+    int nbanks = buf[4]; size_t o = 5;
+    for (int b = 0; b < nbanks && o + 3 <= buf.size(); ++b) {
+        int bank = buf[o]; int nrec = rd_u16(&buf[o + 1]); o += 3;
+        auto& tbl = out[bank];
+        for (int r = 0; r < nrec && o + 6 <= buf.size(); ++r) {
+            Formation fm;
+            fm.id = rd_u16(&buf[o]); fm.noEscape = buf[o + 2];
+            fm.bsc = (int16_t)rd_u16(&buf[o + 3]);
+            int ne = buf[o + 5]; o += 6;
+            for (int e = 0; e < ne && o + 7 <= buf.size(); ++e) {
+                FormEnemy fe;
+                fe.id = rd_u16(&buf[o]);
+                fe.x = (int16_t)rd_u16(&buf[o + 2]);
+                fe.y = (int16_t)rd_u16(&buf[o + 4]);
+                fe.flags = buf[o + 6]; o += 7;
+                fm.enemies.push_back(fe);
+            }
+            if (o < buf.size()) {                  // party-entry overrides (skipped)
+                int nm = buf[o++]; o += (size_t)nm * 4;
+            }
+            tbl[fm.id] = std::move(fm);
+        }
     }
     return out;
 }

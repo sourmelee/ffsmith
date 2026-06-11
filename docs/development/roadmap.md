@@ -9,9 +9,9 @@ M0 loop · M1 byte-identical map render · M2 movement/collision/camera · M3 VM
 
 | # | Milestone | Why now | Key RE targets |
 |---|---|---|---|
-| N1 | **ScriptEncount + scripted-battle hand-off** | Closes the intro into playable m150; the explicit current frontier | `0x50` operands → formation id; post-battle script resume; common 0x101 path |
+| N1 | ~~ScriptEncount + scripted-battle hand-off~~ **DONE 2026-06-10** (`--enctest`; remaining: bsc.dat battle scripts, m200-chain verification on Windows) | — | — |
 | N2 | **Battle fidelity pass 1** | Damage numbers are the most visible inauthenticity | `SetJobStatus` stat derivation; hit-count/crit/element modifiers; original RNG; real enemy SPD/turn model |
-| N3 | **Random encounters** | `encount_ratio` already baked; makes fields dangerous | encounter tables (floor-attr value 15?), step counter logic |
+| N3 | **Random encounters** ◑ areas+formations decoded/baked (FFM5/FENC), approx roll behind `--encounters` | finish: the original per-step roll formula | roll location in FieldClass; floor-attr 15 link |
 | N4 | **NPC movement** | Towns look dead; cutscenes need actor moves | `MoveCharaAuto`/`MoveCharaEvent`, NPC-move opcodes |
 | N5 | **Story persistence completeness** | Long play sessions | common parallels 0x102/0x105/0x106, page register semantics, timer ticking, msgBank override |
 | N6 | **World map presentation** | The real opening look | perspective/tilt renderer, Far background, wrap-aware movement/camera (needs wrap flags baked — toolkit change) |

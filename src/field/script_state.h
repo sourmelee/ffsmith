@@ -26,6 +26,9 @@ struct VMEnv {
     std::function<bool(int)> partyHas;   // member id in party (GetReferenceParty)
     std::function<int(int)>  rand;       // uniform 0..n-1
     std::function<const Event*(int)> findEvent;  // CallEvent 0x66: map events + common pool (map 10000)
+    // GetReference target 8 -> GetReferenceBattle (c:135841): type 3 = last
+    // battle result (1 = won [flag bit9 clear], 2 = escaped [bit10]).
+    std::function<long(int, long)> battleRef;    // (type, idx) -> value
 };
 
 struct ScriptState {
