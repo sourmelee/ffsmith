@@ -1,6 +1,6 @@
 # FFSmith — Engine State Report
 
-*Audit snapshot 2026-06-10 (commit `d2aacc2`, 34 commits since 2026-06-01). This is the authoritative "where is the engine actually at" document. Confidence: HIGH = verified in code + self-test; MEDIUM = implemented but approximated or unverified against the original; LOW = guess/placeholder.*
+*Audit snapshot 2026-06-10 (commit `d2aacc2`, 34 commits since 2026-06-01); data-table completion (real spell/item/job tables) added 2026-06-13. This is the authoritative "where is the engine actually at" document. Confidence: HIGH = verified in code + self-test; MEDIUM = implemented but approximated or unverified against the original; LOW = guess/placeholder.*
 
 ## Maturity summary
 
@@ -37,16 +37,16 @@ FFSmith is **~10 days old and already plays a vertical slice of the real game**:
 
 ### Approximated / heuristic (MEDIUM — flagged in code comments)
 - **ATB**: gauge += SPD per step, threshold 256, random initial stagger (`pickNextActor`). Original turn scheduler not decoded.
-- **Magic**: spell knowledge = `INT≥2`/`MND≥2`, damage `power + INT·3 − def/4 ± rand(4)` — NOT the decoded `CalcMagicDmg`.
+- **Magic**: the spell *table* is now **real decoded data** (0.7.27 — 251 spells with MP=body[7], power=body[19], type/element from the magic body; `spells.bin` FSPL). Still approximated: spell *knowledge* gate = `INT≥2`/`MND≥2` (no learned-ability slots yet) and the damage *application* `power + INT·3 − def/4 ± rand(4)` — NOT the decoded `CalcMagicDmg` formula. Status/buff spells aren't baked (no status system).
 - **Damage formula tail**: crit/element/race/status/hit-count/back-attack/defense% modifiers absent; job-derived attack stat `A` uses raw STR; enemy `W = 5 + level` is invented.
 - **Encounters**: scripted battles (0x50) now use the real formation tables; the debug **B** key still uses the old difficulty-band picker. Random-encounter areas are real data; the per-step roll is approximated (`--encounters`, default off; rate-sum/256 per new cell). Enemy ATB speed = level (decoded: BTLACT+0x40 = level for enemies) — the *player-side* turn scheduler is still the FFSmith approximation.
 - **Run** = 50% coin flip; **Defend** = damage/2.
-- **Item effects**: parsed from description text (digits → heal amount; "Knocked Out" substring → revive). The real item-effect table is undecoded.
+- **Item effects**: equip **ATK/DEF are now real decoded data** (0.7.27 — body[32], keyed by item_type; `items.bin` FITM). Consumable *use* effects are still parsed from description text (digits → heal amount; "Knocked Out" substring → revive) — the heal *magnitude* isn't a literal body field; the real item-effect table is undecoded.
 - **Damage floors**: drain `maxHP/16` per step — exact original amount not decoded (host.cpp:169 comment).
 - **Tile-anim speed**: `ticks/frame = speed·8` — exact speed table not decoded (host.cpp:152).
 - **EXP split**: full EXP to every survivor (original may divide); reward rate fixed at 100%.
 - **Starting inventory/gil**: hardcoded `{Potion×5, Phoenix Down×2, …}, 500 gil` in `newGame()` — not from game data.
-- **Level-ups**: HP/MP only; attributes don't grow; per-job HP%/MP% absent.
+- **Level-ups**: HP/MP only; attributes don't grow. **Per-job HP%/MP% growth is now applied** (0.7.27 — `jobs.bin` FJOB, `SetJobStatus` percents in `memberMaxHp`/`memberMaxMp` + the level-up deltas); the per-stat %s (STR/SPD/VIT/INT/MND) are baked but not yet applied to attributes.
 - **Choice menu text**: option *value* treated as a message id (event_vm comment "0x3c choice menu: each option value is a message id") — provisional; real choice-line source still open.
 - **Boot conditions 2/3**: treated as step triggers "pending their trigger-type RE" (field.cpp:29).
 

@@ -99,8 +99,13 @@ LevelTable load_levels(const std::string& path);
 
 struct SpriteGeo { int isObject = 0, fx = 0, fy = 0, fw = 0, fh = 0, px = 0, py = 0; };  // field_anm per-sprite frame + anchor
 std::unordered_map<int, SpriteGeo> load_spritegeo(const std::string& path);
-struct Spell { int id = 0, type = 0, mp = 0, power = 0; std::string name; };  // type 0=dmg,1=heal
+struct Spell { int id = 0, type = 0, mp = 0, power = 0, element = 0; std::string name; };  // type 0=dmg,1=heal; element mask (1=Fire 2=Ice 4=Thunder 16=Holy...)
 std::vector<Spell> load_spells(const std::string& path);  // data/spells.bin
+
+// Per-job growth multipliers (percent of the shared level-table base).
+// data/jobs.bin "FJOB"; GameClass::SetJobStatus scales base HP/MP/stats by these.
+struct JobGrowth { int hpPct = 100, mpPct = 100, str = 100, spd = 100, vit = 100, intl = 100, mnd = 100; };
+std::unordered_map<int, JobGrowth> load_jobs(const std::string& path);  // job_id -> growth
 
 // data/start.bin (FSTR): New Game start table from boot_data scenario section 1
 // (GameClass::LoadScenarioData).  Record 0 = retail New Game start point.

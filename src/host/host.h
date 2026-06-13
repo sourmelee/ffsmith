@@ -138,6 +138,7 @@ private:
     int  curMember() const;
     int  memberMaxHp(int i) const;
     int  memberMaxMp(int i) const;
+    int  memberJobPct(int i, bool mp) const;        // per-job HP/MP growth percent
     void updateDebug(const InputState& in);
     void renderDebug();
     void drawText(int x, int y, const std::string& s, int maxChars, uint8_t r, uint8_t g, uint8_t b);
@@ -230,6 +231,7 @@ private:
     bool curIsEnemy_ = false;
     int  curIdx_ = 0;
     std::vector<Spell> spells_;
+    std::unordered_map<int, JobGrowth> jobs_;       // job_id -> growth multipliers
     std::vector<int> spellList_;
     int btlSpellSel_ = 0, pendingSpell_ = -1;
     std::string btlMsg_;

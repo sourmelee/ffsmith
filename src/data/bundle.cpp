@@ -318,13 +318,30 @@ std::vector<Spell> load_spells(const std::string& path) {
     if (buf.size() < 8 || std::memcmp(buf.data(), "FSPL", 4) != 0) return out;
     uint32_t n = rd_u32(&buf[4]); size_t o = 8;
     for (uint32_t i = 0; i < n; ++i) {
-        if (o + 9 > buf.size()) break;
+        if (o + 10 > buf.size()) break;
         Spell sp; sp.id = rd_u16(&buf[o]); sp.type = buf[o + 2];
         sp.mp = rd_u16(&buf[o + 3]); sp.power = rd_u16(&buf[o + 5]);
-        int nl = rd_u16(&buf[o + 7]); o += 9;
+        sp.element = buf[o + 7];
+        int nl = rd_u16(&buf[o + 8]); o += 10;
         if (o + (size_t)nl > buf.size()) break;
         sp.name.assign((const char*)&buf[o], nl); o += nl;
         out.push_back(std::move(sp));
+    }
+    return out;
+}
+
+std::unordered_map<int, JobGrowth> load_jobs(const std::string& path) {
+    std::unordered_map<int, JobGrowth> out; auto buf = read_file(path);
+    if (buf.size() < 8 || std::memcmp(buf.data(), "FJOB", 4) != 0) return out;
+    uint32_t n = rd_u32(&buf[4]); size_t o = 8;
+    for (uint32_t i = 0; i < n; ++i) {
+        if (o + 9 > buf.size()) break;
+        int jid = rd_u16(&buf[o]);
+        JobGrowth g;
+        g.hpPct = buf[o + 2]; g.mpPct = buf[o + 3];
+        g.str = buf[o + 4]; g.spd = buf[o + 5]; g.vit = buf[o + 6];
+        g.intl = buf[o + 7]; g.mnd = buf[o + 8]; o += 9;
+        out[jid] = g;
     }
     return out;
 }

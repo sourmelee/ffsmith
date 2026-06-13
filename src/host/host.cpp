@@ -921,6 +921,7 @@ bool Host::loadMenuData(const std::string& dir) {
     chars_ = load_chars(dir + "/data/chars.bin");
     monsters_ = load_monsters(dir + "/data/monsters.bin");
     spells_ = load_spells(dir + "/data/spells.bin");
+    jobs_   = load_jobs(dir + "/data/jobs.bin");
     levels_ = load_levels(dir + "/data/levels.bin");
     spriteGeo_ = load_spritegeo(dir + "/data/spritegeo.bin");
     encounters_ = load_encounters(dir + "/data/encounters.bin");
@@ -1119,18 +1120,29 @@ void Host::beginNextTurn() {
     }
 }
 
+// Per-job growth percent for the member's current job (GameClass::SetJobStatus):
+// maxHP = base_hp[level] * jobHpPct / 100, likewise MP.  Defaults to 100% when
+// the job isn't in the table.
+int Host::memberJobPct(int i, bool mp) const {
+    if (i < 0 || i >= (int)gameParty_.size()) return 100;
+    int ci = gameParty_[i].charIdx;
+    int job = (ci >= 0 && ci < (int)chars_.size()) ? chars_[ci].job : 0;
+    auto it = jobs_.find(job);
+    if (it == jobs_.end()) return 100;
+    return mp ? it->second.mpPct : it->second.hpPct;
+}
 int Host::memberMaxHp(int i) const {
     if (i < 0 || i >= (int)gameParty_.size()) return 1;
     int ci = gameParty_[i].charIdx;
     int lvl = gameParty_[i].level > 0 ? gameParty_[i].level : (ci >= 0 && ci < (int)chars_.size() ? chars_[ci].level : 1);
-    if (levels_.valid()) return std::max(1, levels_.maxHp(lvl));
+    if (levels_.valid()) return std::max(1, levels_.maxHp(lvl) * memberJobPct(i, false) / 100);
     return (ci >= 0 && ci < (int)chars_.size() && chars_[ci].hp > 0) ? chars_[ci].hp : 30;
 }
 int Host::memberMaxMp(int i) const {
     if (i < 0 || i >= (int)gameParty_.size()) return 0;
     int ci = gameParty_[i].charIdx;
     int lvl = gameParty_[i].level > 0 ? gameParty_[i].level : (ci >= 0 && ci < (int)chars_.size() ? chars_[ci].level : 1);
-    if (levels_.valid()) return std::max(0, levels_.maxMp(lvl));
+    if (levels_.valid()) return std::max(0, levels_.maxMp(lvl) * memberJobPct(i, true) / 100);
     return (ci >= 0 && ci < (int)chars_.size()) ? chars_[ci].mp : 0;
 }
 
@@ -1162,10 +1174,14 @@ std::string Host::awardBattleRewards() {
         gm.exp = (int)std::min<long>(9999999, (long)gm.exp + totExp);
         int newLvl = levels_.valid() ? levels_.levelFromExp(gm.exp) : gm.level;
         if (newLvl > gm.level) {
-            int oldHp = levels_.maxHp(gm.level), oldMp = levels_.maxMp(gm.level);
+            int job = (gm.charIdx >= 0 && gm.charIdx < (int)chars_.size()) ? chars_[gm.charIdx].job : 0;
+            auto jit = jobs_.find(job);
+            int hpPct = jit != jobs_.end() ? jit->second.hpPct : 100;
+            int mpPct = jit != jobs_.end() ? jit->second.mpPct : 100;
+            int oldHp = levels_.maxHp(gm.level) * hpPct / 100, oldMp = levels_.maxMp(gm.level) * mpPct / 100;
             gm.level = newLvl;
-            gm.hp += std::max(0, levels_.maxHp(newLvl) - oldHp);     // gain the HP/MP delta
-            gm.mp += std::max(0, levels_.maxMp(newLvl) - oldMp);
+            gm.hp += std::max(0, levels_.maxHp(newLvl) * hpPct / 100 - oldHp);   // gain the HP/MP delta (job-scaled)
+            gm.mp += std::max(0, levels_.maxMp(newLvl) * mpPct / 100 - oldMp);
             if (gm.charIdx >= 0 && gm.charIdx < (int)chars_.size())
                 ups += (ups.empty() ? "" : ", ") + chars_[gm.charIdx].name + " L" + std::to_string(newLvl);
         }
