@@ -1,8 +1,14 @@
 # FFSmith
 
+[![version](https://img.shields.io/badge/version-0.1.0-blue.svg)](CHANGELOG.md)
+
 Clean-room reimplementation of the **Final Fantasy Dimensions / Final Fantasy Legends** engine, in C++17. The working name nods to the engine's own `Mtx` ("Matrix") middleware.
 
 Companion to the Python **FFD/FFL Toolkit** (`../Python/`): the toolkit bakes verified assets that FFSmith loads, and the two are developed together. The toolkit's parse output is FFSmith's source of truth and its golden test data. See `docs/ASSET_PIPELINE.md`.
+
+## Versioning
+
+FFSmith is versioned with [Semantic Versioning](https://semver.org/), starting at **0.1.0**, on the same conventions as the Toolkit. The canonical version is `FFSMITH_VERSION` in [`src/version.h`](src/version.h); `CMakeLists.txt` `project(... VERSION ...)` mirrors it. Changes are recorded in [`CHANGELOG.md`](CHANGELOG.md) (Keep a Changelog format); PATCH bumps happen freely, MINOR/MAJOR bumps are confirmed first. The badge above and this section track the *released* version — for live, in-progress engine state see [`docs/architecture/ffsmith_status.md`](docs/architecture/ffsmith_status.md).
 
 ## Status
 
