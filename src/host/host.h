@@ -76,6 +76,7 @@ public:
     void selfTestItemUse();      // headless: damage a member, use a Potion, report
     void selfTestEquip();        // headless: swap a weapon, report stat + inventory change
     void selfTestLevel();        // headless: award EXP, report level-up + HP growth
+    void selfTestJobStat();      // headless: verify job-derived battle attributes (SetJobStatus)
     void selfTestRevive();       // headless: KO a member, use Phoenix Down
     void selfTestMenu();         // headless: exercise the title menu dispatch
     const std::vector<GameMember>& gameParty() const { return gameParty_; }
@@ -139,6 +140,7 @@ private:
     int  memberMaxHp(int i) const;
     int  memberMaxMp(int i) const;
     int  memberJobPct(int i, bool mp) const;        // per-job HP/MP growth percent
+    int  memberStat(int i, int which) const;        // job-derived attribute: 0=STR 1=SPD 2=VIT 3=INT 4=MND
     void updateDebug(const InputState& in);
     void renderDebug();
     void drawText(int x, int y, const std::string& s, int maxChars, uint8_t r, uint8_t g, uint8_t b);

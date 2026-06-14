@@ -400,6 +400,11 @@ LevelTable load_levels(const std::string& path) {
     if (o + 2 > buf.size()) return t;
     int ng = rd_u16(&buf[o]); o += 2;
     for (int i = 0; i < ng && o + 4 <= buf.size(); ++i) { t.hp.push_back(rd_u16(&buf[o])); t.mp.push_back(rd_u16(&buf[o + 2])); o += 4; }
+    // FLVL 0.7.28 trailer: per-level base-stat (u16 each).  Optional / back-tolerant.
+    if (o + 2 <= buf.size()) {
+        int ns = rd_u16(&buf[o]); o += 2;
+        for (int i = 0; i < ns && o + 2 <= buf.size(); ++i) { t.base.push_back(rd_u16(&buf[o])); o += 2; }
+    }
     return t;
 }
 

@@ -1146,6 +1146,28 @@ int Host::memberMaxMp(int i) const {
     return (ci >= 0 && ci < (int)chars_.size()) ? chars_[ci].mp : 0;
 }
 
+// Job-derived battle attribute (GameClass::SetJobStatus, libjniproxy 152644-152705):
+// each of the five attributes = max(1, base_stat[level] * jobStatPct / 100), where
+// base_stat is the shared per-level boot-section-8 byte (FLVL base[]) and jobStatPct
+// is the member's job percent for that attribute (FJOB body[11..15]).  Equipment /
+// learned-ability stat bonuses are not yet decoded, so they are omitted here (the
+// weapon W and armor D still come from equipped gear).  which: 0=STR 1=SPD 2=VIT
+// 3=INT 4=MND.  Falls back to the raw chara_set attribute when no level table is
+// loaded (keeps the engine playable on an older bundle).
+int Host::memberStat(int i, int which) const {
+    if (i < 0 || i >= (int)gameParty_.size()) return 1;
+    int ci = gameParty_[i].charIdx;
+    const CharRec* c = (ci >= 0 && ci < (int)chars_.size()) ? &chars_[ci] : nullptr;
+    int lvl = gameParty_[i].level > 0 ? gameParty_[i].level : (c ? c->level : 1);
+    int pct = 100;
+    if (c) { auto it = jobs_.find(c->job);
+        if (it != jobs_.end()) { const JobGrowth& g = it->second;
+            pct = which==0?g.str : which==1?g.spd : which==2?g.vit : which==3?g.intl : g.mnd; } }
+    if (levels_.valid()) return std::max(1, levels_.baseStat(lvl) * pct / 100);
+    if (!c) return 1;
+    return std::max(1, which==0?c->str : which==1?c->spd : which==2?c->vit : which==3?c->intl : c->mnd);
+}
+
 void Host::newGame() {
     clearFade();
     gameParty_.clear();
@@ -1415,6 +1437,43 @@ void Host::selfTestLevel() {
                 chars_[gm.charIdx].name.c_str(), gm.level, gm.exp, gm.hp, memberMaxHp(0), gil_);
 }
 
+// N2 job-stat derivation check (GameClass::SetJobStatus).  For each party member
+// it independently recomputes attr = max(1, base_stat[level] * jobStatPct / 100)
+// from the loaded level + job tables and asserts memberStat() agrees, then prints
+// the derived combatant attributes for eyeball verification.  PASS requires the
+// FLVL base-stat trailer to be present and every attribute to match + be in range.
+void Host::selfTestJobStat() {
+    if (gameParty_.empty()) newGame();
+    bool ok = true;
+    if (!levels_.valid() || levels_.base.empty()) {
+        std::printf("[jobstattest] WARN: bundle has no FLVL base-stat trailer (re-bake with toolkit >=0.7.28)\n");
+        ok = false;
+    }
+    static const char* SN[5] = {"STR","SPD","VIT","INT","MND"};
+    for (size_t i = 0; i < gameParty_.size(); ++i) {
+        int ci = gameParty_[i].charIdx;
+        if (ci < 0 || ci >= (int)chars_.size()) continue;
+        const CharRec& c = chars_[ci];
+        int lvl = gameParty_[i].level > 0 ? gameParty_[i].level : c.level;
+        int bstat = levels_.valid() ? levels_.baseStat(lvl) : 0;
+        JobGrowth g; auto it = jobs_.find(c.job); if (it != jobs_.end()) g = it->second;
+        int pct[5] = { g.str, g.spd, g.vit, g.intl, g.mnd };
+        std::printf("[jobstattest] %-8s job%d L%d  baseHP%d baseMP%d baseStat%d  HP%d MP%d |",
+                    c.name.c_str(), c.job, lvl, levels_.maxHp(lvl), levels_.maxMp(lvl), bstat,
+                    memberMaxHp((int)i), memberMaxMp((int)i));
+        for (int w = 0; w < 5; ++w) {
+            int got = memberStat((int)i, w);
+            int exp = levels_.valid() ? std::max(1, bstat * pct[w] / 100)
+                                      : std::max(1, w==0?c.str:w==1?c.spd:w==2?c.vit:w==3?c.intl:c.mnd);
+            bool good = (got == exp) && got >= 1 && got <= 999;
+            if (!good) ok = false;
+            std::printf("  %s%d(%d%%)%s", SN[w], got, pct[w], good ? "" : "!=EXP");
+        }
+        std::printf("\n");
+    }
+    std::printf("[jobstattest] %s\n", ok ? "PASS" : "FAIL");
+}
+
 void Host::selfTestMenu() {
     if (startMap_.empty()) setStartMap("g0_p0_m500");
     hasSave_ = true;
@@ -1623,11 +1682,11 @@ void Host::startBattle(int leadId) {
         cb.maxhp = (c.hp > 0 ? c.hp : 28 + c.level * 2 + c.vit * 4);
         cb.hp = std::max(0, std::min(gm.hp, cb.maxhp));     // CURRENT hp (carries between battles)
         cb.maxmp = c.mp; cb.mp = std::max(0, std::min(gm.mp, cb.maxmp));
-        cb.atk = std::max(1, c.str);                        // A = real STR
+        cb.atk = memberStat((int)gi, 0);                    // A = job-derived STR (SetJobStatus)
         cb.wpn = std::max(3, weaponAtk);                    // W = equipped weapon ATK
-        cb.def = std::max(1, c.vit + armorDef + c.level / 2);
-        cb.level = c.level; cb.spd = std::max(1, c.spd);
-        cb.intl = c.intl; cb.mnd = c.mnd;
+        cb.def = std::max(1, memberStat((int)gi, 2) + armorDef + c.level / 2);  // D = job-derived VIT + armor
+        cb.level = c.level; cb.spd = std::max(1, memberStat((int)gi, 1));       // SPD job-derived
+        cb.intl = memberStat((int)gi, 3); cb.mnd = memberStat((int)gi, 4);      // INT/MND job-derived
         party_.push_back(cb);
     }
     if (party_.empty()) { Combatant cb; cb.name = "Hero"; cb.hp = cb.maxhp = 34; cb.atk = 13; cb.wpn = 6; cb.def = 6; party_.push_back(cb); }

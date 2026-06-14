@@ -27,6 +27,25 @@ not this log.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-14
+
+### Added
+
+- **N2 job-derived battle stats** (`SetJobStatus`).  `Host::memberStat(i, which)`
+  derives each of the five attributes as `max(1, base_stat[level] * jobPct / 100)`
+  from the FLVL per-level base-stat byte and the FJOB per-job stat% (libjniproxy
+  152644-152705; FF5-PC `FUN_00468490` cross-check).  The battle combatant build
+  now uses it for attack `A` (STR), defense (VIT), and magic (INT/MND), retiring
+  the raw-STR `A` placeholder.
+- `--jobstattest` self-test: recomputes the derivation independently and asserts
+  `memberStat()` agrees + prints the derived party stats (PASS/FAIL).
+
+### Changed
+
+- `data/levels.bin` loader (`load_levels`) reads the FLVL 0.7.28 base-stat
+  trailer into `LevelTable::base[]`; `baseStat(L)` accessor added (back-tolerant:
+  falls back to a coarse level proxy on an older bundle).
+
 ## [0.1.0] - 2026-06-13
 
 Inaugural versioned release. At this point FFSmith already plays a **vertical

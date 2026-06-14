@@ -263,7 +263,7 @@ int main(int argc, char** argv) {
     bool debugMode = false, dbgNoclip = false, dbgOverlay = false, dbgHud = false;
     int menuPageFlag = 0, battleMon = -1, battleSim = -1;
     bool spellTest = false, saveFlag = false, loadFlag = false, itemTest = false, equipTest = false;
-    int animTick = 0; bool dmgTest = false, noOverhead = false, levelTest = false, reviveTest = false, menuTest = false; int introBeat = -1;
+    int animTick = 0; bool dmgTest = false, noOverhead = false, levelTest = false, reviveTest = false, menuTest = false, jobStatTest = false; int introBeat = -1;
     bool encTest = false, encountersOn = false, cutTest = false;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
@@ -289,6 +289,7 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--equiptest")) equipTest = true;
         else if (!std::strcmp(a, "--dmgtest")) dmgTest = true;
         else if (!std::strcmp(a, "--leveltest")) levelTest = true;
+        else if (!std::strcmp(a, "--jobstattest")) jobStatTest = true;
         else if (!std::strcmp(a, "--revivetest")) reviveTest = true;
         else if (!std::strcmp(a, "--menutest")) menuTest = true;
         else if (!std::strcmp(a, "--enctest")) encTest = true;
@@ -514,6 +515,7 @@ int main(int argc, char** argv) {
     if (equipTest) { host.selfTestEquip(); return 0; }
     if (dmgTest) { host.selfTestDamage(); return 0; }
     if (levelTest) { host.selfTestLevel(); return 0; }
+    if (jobStatTest) { host.selfTestJobStat(); return 0; }
     if (reviveTest) { host.selfTestRevive(); return 0; }
     if (menuTest) { host.selfTestMenu(); return 0; }
     if (encTest) { host.setMapKey(map); host.selfTestEncounter(); return 0; }

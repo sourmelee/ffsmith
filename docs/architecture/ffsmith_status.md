@@ -1,6 +1,10 @@
 # FFSmith — Engine State Report
 
-*Audit snapshot 2026-06-10 (commit `d2aacc2`, 34 commits since 2026-06-01); data-table completion (real spell/item/job tables) added 2026-06-13. This is the authoritative "where is the engine actually at" document. Confidence: HIGH = verified in code + self-test; MEDIUM = implemented but approximated or unverified against the original; LOW = guess/placeholder.*
+*Audit snapshot 2026-06-10 (commit `d2aacc2`, 34 commits since 2026-06-01); data-table completion (real spell/item/job tables) added 2026-06-13; N2 job-stat derivation added 2026-06-14. This is the authoritative "where is the engine actually at" document. Confidence: HIGH = verified in code + self-test; MEDIUM = implemented but approximated or unverified against the original; LOW = guess/placeholder.*
+
+## Ground-truth references (2026-06-14)
+
+Shared engine systems are now disambiguated against **two** decompiles. **Primary: `libjniproxy.so` (FFD Android)** -- `Decomp/FFV_FFD_compare/libjniproxy.so_new.c`, citations use its c-file line numbers. **Sanctioned 2nd ground-truth: the FF5-PC decompile** -- `Decomp/FFV_FFD_compare/FFV_Game.exe.unpacked.exe.c` (ImageBase 0x400000, so **decomp addr = RVA + 0x400000**; field map in `Decomp/FFV_FFD_compare/ffd_port/docs/ffv_pc_addresses.md`). The same-engine premise is proven by the `ffd_port` re-bake (FF5's unmodified loaders parse re-baked FFD boot_data). Use FF5-PC only to clarify murky Android code; **never let it override `libjniproxy`** -- the two engines share structure but differ in model (e.g. FF5 job stats are flat bonuses, FFD's are %-growth).
 
 ## Maturity summary
 
@@ -38,7 +42,7 @@ FFSmith is **~10 days old and already plays a vertical slice of the real game**:
 ### Approximated / heuristic (MEDIUM — flagged in code comments)
 - **ATB**: gauge += SPD per step, threshold 256, random initial stagger (`pickNextActor`). Original turn scheduler not decoded.
 - **Magic**: the spell *table* is now **real decoded data** (0.7.27 — 251 spells with MP=body[7], power=body[19], type/element from the magic body; `spells.bin` FSPL). Still approximated: spell *knowledge* gate = `INT≥2`/`MND≥2` (no learned-ability slots yet) and the damage *application* `power + INT·3 − def/4 ± rand(4)` — NOT the decoded `CalcMagicDmg` formula. Status/buff spells aren't baked (no status system).
-- **Damage formula tail**: crit/element/race/status/hit-count/back-attack/defense% modifiers absent; job-derived attack stat `A` uses raw STR; enemy `W = 5 + level` is invented.
+- **Damage formula tail**: crit/element/race/status/hit-count/back-attack/defense% modifiers absent. (Resolved 2026-06-14: the job-derived attack stat `A` and the other four attributes now come from `SetJobStatus` -- `memberStat()` = `base_stat[level]*jobPct/100`, FLVL base[] + FJOB; raw-STR `A` retired. Equip/ability stat bonuses still omitted; enemy `W` = monster body[15].)
 - **Encounters**: scripted battles (0x50) now use the real formation tables; the debug **B** key still uses the old difficulty-band picker. Random-encounter areas are real data; the per-step roll is approximated (`--encounters`, default off; rate-sum/256 per new cell). Enemy ATB speed = level (decoded: BTLACT+0x40 = level for enemies) — the *player-side* turn scheduler is still the FFSmith approximation.
 - **Run** = 50% coin flip; **Defend** = damage/2.
 - **Item effects**: equip **ATK/DEF are now real decoded data** (0.7.27 — body[32], keyed by item_type; `items.bin` FITM). Consumable *use* effects are still parsed from description text (digits → heal amount; "Knocked Out" substring → revive) — the heal *magnitude* isn't a literal body field; the real item-effect table is undecoded.
@@ -46,7 +50,7 @@ FFSmith is **~10 days old and already plays a vertical slice of the real game**:
 - **Tile-anim speed**: `ticks/frame = speed·8` — exact speed table not decoded (host.cpp:152).
 - **EXP split**: full EXP to every survivor (original may divide); reward rate fixed at 100%.
 - **Starting inventory/gil**: hardcoded `{Potion×5, Phoenix Down×2, …}, 500 gil` in `newGame()` — not from game data.
-- **Level-ups**: HP/MP only; attributes don't grow. **Per-job HP%/MP% growth is now applied** (0.7.27 — `jobs.bin` FJOB, `SetJobStatus` percents in `memberMaxHp`/`memberMaxMp` + the level-up deltas); the per-stat %s (STR/SPD/VIT/INT/MND) are baked but not yet applied to attributes.
+- **Level-ups**: HP/MP grow via the §8 curve (job-scaled) on level-up. **The five attributes (STR/SPD/VIT/INT/MND) are now job-derived** (FFSmith 0.1.1 / toolkit 0.7.28 — `memberStat()` = §8 per-level base-stat × FJOB per-job stat% / 100) and recompute from the member's current level whenever the battle party is built, so they rise with level. Still approximated: equipment/ability stat bonuses are omitted, and level-up persists no per-attribute deltas (attributes are derived on the fly, not stored).
 - **Choice menu text**: option *value* treated as a message id (event_vm comment "0x3c choice menu: each option value is a message id") — provisional; real choice-line source still open.
 - **Boot conditions 2/3**: treated as step triggers "pending their trigger-type RE" (field.cpp:29).
 
@@ -64,7 +68,7 @@ FFSmith is **~10 days old and already plays a vertical slice of the real game**:
 
 1. ~~ScriptEncount semantics~~ **RESOLVED + implemented 2026-06-10** (formations/areas/result decoded; see Python/docs/formats/battles.md). New frontier within battles: `bsc.dat` battle-script VM and the original encounter roll.
 2. **Real turn scheduler / RNG** — original PRNG unidentified (roadmap Part 6 risk; needed before battle exact-match).
-3. **Job stat derivation** (`SetJobStatus`) — required for damage exact-match; BTLACT map exists, derivation doesn't.
+3. ~~**Job stat derivation** (`SetJobStatus`)~~ **RESOLVED 2026-06-14**: decoded (libjniproxy 152644-152705, FF5-PC `FUN_00468490` cross-check) and implemented -- the five attributes derive from the §8 per-level base-stat byte x per-job stat% (FLVL base[] + FJOB), `--jobstattest`. Equip/ability stat bonuses remain undecoded.
 4. **Timing model** — assumed 60 Hz frame-locked; never confirmed against the original (roadmap Part 6 risk, still open).
 5. **Title BGM id** — placeholder 18, confirm by ear.
 6. **Real opening world-map presentation** — needs the perspective renderer.

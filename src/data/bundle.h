@@ -89,11 +89,13 @@ std::unordered_map<int, std::unordered_map<int, Formation>> load_encounters(cons
 struct LevelTable {                              // data/levels.bin (EXP thresholds + HP/MP growth)
     std::vector<uint32_t> thr;                   // thr[i] = cumulative EXP to reach level i+1
     std::vector<int> hp, mp;                     // per-level max HP / MP (index = level)
+    std::vector<int> base;                       // per-level base-stat byte (FLVL 0.7.28 trailer); the 5 attributes scale from this
     bool valid() const { return !hp.empty(); }
     int levelFromExp(long e) const { int L = 0; for (uint32_t t : thr) { if (e >= (long)t) ++L; else break; } return L; }
     int maxHp(int L) const { if (hp.empty()) return 30; if (L < 0) L = 0; if (L >= (int)hp.size()) L = (int)hp.size()-1; return hp[L]; }
     int maxMp(int L) const { if (mp.empty()) return 0;  if (L < 0) L = 0; if (L >= (int)mp.size()) L = (int)mp.size()-1; return mp[L]; }
     long expForLevel(int L) const { return (L >= 1 && L-1 < (int)thr.size()) ? (long)thr[L-1] : 0; }
+    int baseStat(int L) const { if (base.empty()) return 5 + (L > 0 ? L : 0); if (L < 0) L = 0; if (L >= (int)base.size()) L = (int)base.size()-1; return base[L]; }
 };
 LevelTable load_levels(const std::string& path);
 
