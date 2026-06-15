@@ -19,7 +19,7 @@ namespace ffsmith {
 
 class Field;
 
-struct Combatant { std::string name; int hp = 0, maxhp = 0, atk = 0, def = 0; bool defending = false; int spd = 8, atb = 0, mp = 0, maxmp = 0, intl = 0, mnd = 0, wpn = 4, level = 1; long exp = 0, gil = 0; };
+struct Combatant { std::string name; int hp = 0, maxhp = 0, atk = 0, def = 0; bool defending = false; int spd = 8, atb = 0, mp = 0, maxmp = 0, intl = 0, mnd = 0, wpn = 4, level = 1; long exp = 0, gil = 0; int sprite = -1, frames = 0; };
 struct GameMember { int charIdx = -1; int hp = 0, mp = 0; int equip[6] = {0,0,0,0,0,0}; int level = 0, exp = 0; };   // persistent party (HP/MP + equip + level/exp)
 struct FloatNum { int idx = 0; bool enemy = true; int value = 0; int age = 0; bool heal = false; };  // floating battle damage/heal number
 struct InvSlot    { int id = 0, count = 0; };
@@ -133,6 +133,7 @@ private:
     void render();
     bool ensureMapTexture(const Texture& img);
     SDL_Texture* spriteTex(int img, int var, int& w, int& h);  // cached fldchr sheet
+    SDL_Texture* monTex(int sprite, int& w, int& h);           // cached tex/mon{sprite}.tex idle strip
     bool drawSprite(int img, int var, int facing, int animCol, int lx, int ly, int tile);
     void updateMenu(const InputState& in);
     void renderTitle();
@@ -197,6 +198,8 @@ private:
     uint8_t fadeR_ = 0, fadeG_ = 0, fadeB_ = 0;
     void clearFade() { fadeAlpha_ = fadeTarget_ = fadeStep_ = 0; }
     std::unordered_map<int, SDL_Texture*> sprites_;   // key = img*100+var
+    std::unordered_map<int, SDL_Texture*> monSprites_;// key = monster sprite set id
+    int battleAnim_ = 0;                              // battle idle-animation frame timer
     std::unordered_map<int, SDL_Texture*> sheets_;    // tilesheets for anim overdraw (mc*100+var)
     std::unordered_map<int, std::unordered_map<int, ChipAnim>> chipAnim_;   // mc -> inner -> anim
     std::unordered_map<int, std::unordered_map<int, int>> chipFloor_;       // mc -> inner -> floorAttr

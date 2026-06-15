@@ -1,6 +1,6 @@
 # FFSmith
 
-[![version](https://img.shields.io/badge/version-0.1.2-blue.svg)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.1.3-blue.svg)](CHANGELOG.md)
 
 Clean-room reimplementation of the **Final Fantasy Dimensions / Final Fantasy Legends** engine, in C++17. The working name nods to the engine's own `Mtx` ("Matrix") middleware.
 

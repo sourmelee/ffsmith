@@ -27,6 +27,17 @@ not this log.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-06-15
+
+### Added
+
+- **Animated monster battle sprites.** Enemies now render as their real FFD
+  sprites (`tex/mon{sprite}.tex`, sprite set = monster `body[0]`), idle-animated
+  (frame = timer % nframes), positioned in the battle scene with name + HP bar +
+  target caret. `Monster`/`Combatant` carry `sprite`/`frames`; `monTex` caches the
+  strip; FMN2 loader reads the new fields. Falls back to the text box if a sprite
+  is missing. (Character battle sprites next.)
+
 ## [0.1.2] - 2026-06-14
 
 ### Added

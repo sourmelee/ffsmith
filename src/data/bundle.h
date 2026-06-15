@@ -72,6 +72,7 @@ std::vector<CharRec> load_chars(const std::string& path);   // data/chars.bin
 // SetBtlEnemyParam c:88427): atk = weapon-attack body[15]; the enemy's
 // attack STAT (BTLACT+0x3c) is its LEVEL; MP = HP/8.
 struct Monster { int id = 0; std::string name; int hp = 0, atk = 0, def = 0, level = 1; long exp = 0, gil = 0;
+                 int sprite = -1, frames = 0;   // battle sprite set (body[0]) + idle frame count (tex/mon{sprite}.tex strip)
                  int mdef = 0, eva = 0, meva = 0, amin = 0, amax = 0; };
 std::vector<Monster> load_monsters(const std::string& path);  // data/monsters.bin (FMON or FMN2)
 

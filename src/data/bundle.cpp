@@ -278,6 +278,9 @@ std::vector<Monster> load_monsters(const std::string& path) {
             m.mdef = buf[o]; m.eva = buf[o+1]; m.meva = buf[o+2];
             m.amin = buf[o+3]; m.amax = buf[o+4]; o += 5;
         }
+        if (v2 && o + 3 <= buf.size()) {           // battle sprite set + idle frame count (back-tolerant)
+            m.sprite = rd_u16(&buf[o]); m.frames = buf[o+2]; o += 3;
+        }
         out.push_back(std::move(m));
     }
     return out;

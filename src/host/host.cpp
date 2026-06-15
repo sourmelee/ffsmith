@@ -285,6 +285,22 @@ SDL_Texture* Host::spriteTex(int img, int var, int& w, int& h) {
     return tex;
 }
 
+// Cached monster battle-sprite strip (tex/mon{sprite}.tex = nframes frames side by side).
+SDL_Texture* Host::monTex(int sprite, int& w, int& h) {
+    auto it = monSprites_.find(sprite);
+    if (it != monSprites_.end()) { if (it->second) SDL_QueryTexture(it->second, nullptr, nullptr, &w, &h); return it->second; }
+    char path[512]; std::snprintf(path, sizeof(path), "%s/tex/mon%d.tex", bundleDir_.c_str(), sprite);
+    Texture t = load_tex(path);
+    SDL_Texture* tex = nullptr;
+    if (t.valid()) {
+        tex = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, t.w, t.h);
+        if (tex) { SDL_UpdateTexture(tex, nullptr, t.rgba.data(), t.w * 4); SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND); }
+    }
+    monSprites_[sprite] = tex;
+    if (tex) { w = t.w; h = t.h; }
+    return tex;
+}
+
 // Draw a character frame, feet-aligned on a tile at logical (lx,ly).
 // field_anm character template (Jack-confirmed on fldchr1): 48x48 cells, origin
 // (1,1), pitch 50.  ROW = facing: DOWN=y1, UP=y51, LEFT=y101, RIGHT=y101 (LEFT
@@ -1605,6 +1621,7 @@ void Host::startFormationBattle(const VMEncounter& enc) {
         e.spd = std::max(1, m->level);    // BTLACT+0x40 (SPD-class) = level for enemies
         e.mp = e.maxmp = m->hp / 8;       // enemy MP = HP/8 (SetBtlEnemyParam)
         e.exp = m->exp; e.gil = m->gil;
+        e.sprite = m->sprite; e.frames = m->frames;
         enemies_.push_back(e);
     }
     if (enemies_.empty()) {
@@ -1986,6 +2003,7 @@ void Host::startBattle(int leadId) {
         e.level = m->level; e.spd = std::max(1, m->level);
         e.mp = e.maxmp = m->hp / 8;
         e.exp = m->exp; e.gil = m->gil;
+        e.sprite = m->sprite; e.frames = m->frames;
         enemies_.push_back(e);
     };
     push(lead);
@@ -2126,19 +2144,41 @@ void Host::renderBattle() {
     SDL_SetRenderDrawColor(renderer_, 8, 10, 28, 255); SDL_Rect bp{ 0, sceneH, vw, vh - sceneH }; SDL_RenderFillRect(renderer_, &bp);
     SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
     int N = (int)enemies_.size(); if (N < 1) N = 1;
-    int gap = 4, boxW = (vw - gap * (N + 1)) / N; if (boxW < 40) boxW = 40;
+    ++battleAnim_;
+    int slotW = vw / N;
+    int spriteBottom = sceneH * 72 / 100;             // monsters stand in the upper scene
     for (int i = 0; i < (int)enemies_.size(); ++i) {
         const Combatant& e = enemies_[i];
-        int bx = gap + i * (boxW + gap), by = 16, bh = fch_ + 12;
         bool dead = e.hp <= 0, tgt = (btlPhase_ == 5 && i == target_);
-        SDL_SetRenderDrawColor(renderer_, tgt ? 60 : 0, 0, 0, dead ? 80 : 165);
-        SDL_Rect eb{ bx, by, boxW, bh }; SDL_RenderFillRect(renderer_, &eb);
-        if (tgt) { SDL_SetRenderDrawColor(renderer_, 255, 240, 120, 255); SDL_RenderDrawRect(renderer_, &eb); }
-        drawText(bx + 4, by + 2, e.name, boxW / (fcw_ > 0 ? fcw_ : 8) - 1, dead ? 120 : 255, dead ? 120 : 210, dead ? 120 : 210);
-        int barW = boxW - 8, byy = by + fch_ + 2;
-        SDL_SetRenderDrawColor(renderer_, 60, 30, 30, 255); SDL_Rect bgr{ bx + 4, byy, barW, 3 }; SDL_RenderFillRect(renderer_, &bgr);
+        int cx = i * slotW + slotW / 2;
+        SDL_Rect dst{ cx - 16, spriteBottom - 24, 32, 24 };   // fallback rect if no sprite
+        int tw = 0, th = 0;
+        SDL_Texture* mt = (e.sprite >= 0 && e.frames > 0) ? monTex(e.sprite, tw, th) : nullptr;
+        if (mt && th > 0) {
+            int fw = tw / std::max(1, e.frames);
+            int frame = (battleAnim_ / 8) % std::max(1, e.frames);
+            double maxw = std::min(slotW - 6, 112), maxh = sceneH * 0.7;
+            double scl = std::min(maxw / std::max(1, fw), maxh / th); if (scl > 2.0) scl = 2.0; if (scl <= 0) scl = 1.0;
+            int dw = (int)(fw * scl), dh = (int)(th * scl);
+            SDL_Rect src{ frame * fw, 0, fw, th };
+            dst = SDL_Rect{ cx - dw / 2, spriteBottom - dh, dw, dh };
+            SDL_SetTextureColorMod(mt, dead ? 90 : 255, dead ? 90 : 255, dead ? 90 : 255);
+            SDL_SetTextureAlphaMod(mt, dead ? 110 : 255);
+            SDL_RenderCopy(renderer_, mt, &src, &dst);
+            SDL_SetTextureColorMod(mt, 255, 255, 255); SDL_SetTextureAlphaMod(mt, 255);
+        }
+        if (tgt) {                                    // target marker: highlight box + a small caret above
+            SDL_SetRenderDrawColor(renderer_, 255, 240, 120, 255); SDL_RenderDrawRect(renderer_, &dst);
+            for (int t2 = 0; t2 < 4; ++t2) { SDL_Rect tk{ cx - t2, dst.y - 6 + t2, 1 + t2 * 2, 1 }; SDL_RenderFillRect(renderer_, &tk); }
+        }
+        // name + HP bar under the sprite (still in the scene)
+        int ny = spriteBottom + 1;
+        drawText(cx - (int)e.name.size() * fcw_ / 2, ny, e.name, slotW / (fcw_ > 0 ? fcw_ : 8),
+                 dead ? 120 : 255, dead ? 120 : 230, dead ? 120 : 210);
+        int barW = std::min(slotW - 8, 60), bxw = cx - barW / 2, byy = ny + fch_ + 1;
+        SDL_SetRenderDrawColor(renderer_, 60, 30, 30, 220); SDL_Rect bgr{ bxw, byy, barW, 3 }; SDL_RenderFillRect(renderer_, &bgr);
         int fillw = e.maxhp > 0 ? barW * std::max(0, e.hp) / e.maxhp : 0;
-        SDL_SetRenderDrawColor(renderer_, 220, 64, 64, 255); SDL_Rect bf{ bx + 4, byy, fillw, 3 }; SDL_RenderFillRect(renderer_, &bf);
+        SDL_SetRenderDrawColor(renderer_, 220, 64, 64, 255); SDL_Rect bf{ bxw, byy, fillw, 3 }; SDL_RenderFillRect(renderer_, &bf);
     }
     int py = sceneH + 3;
     for (size_t i = 0; i < party_.size(); ++i) {
