@@ -1,6 +1,6 @@
 # FFSmith
 
-[![version](https://img.shields.io/badge/version-0.1.1-blue.svg)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.1.2-blue.svg)](CHANGELOG.md)
 
 Clean-room reimplementation of the **Final Fantasy Dimensions / Final Fantasy Legends** engine, in C++17. The working name nods to the engine's own `Mtx` ("Matrix") middleware.
 
@@ -123,3 +123,5 @@ docs/       ASSET_PIPELINE.md + per-subsystem specs
 FFSmith is **co-authored using Claude Cowork** (Anthropic), developed alongside the
 FFD/FFL Toolkit (`../Python`) as a clean-room reimplementation. See `ENGINE_RE_ROADMAP.md` for the design and `docs/ASSET_PIPELINE.md` for the
 toolkit↔engine asset contract.
+
+**Party + menu (0.1.2):** FFD dual Light/Dark parties (5 each, `switchSide`, FSAV v6), the full FFD main-menu command set (Item/Magic/Equip/Job/Status/Formation/Config/Save) with the FFD window skin, a Formation tab (reorder/add/remove/switch side) and a Debug **Party** toggle.

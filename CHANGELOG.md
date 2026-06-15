@@ -27,6 +27,72 @@ not this log.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-06-14
+
+### Added
+
+- **UI polish pass.** Text now has a 1px **drop-shadow** (`drawText`, the classic
+  FF look, toggleable). Gil/EXP use thousands separators (`commafy`). A `drawGauge`
+  helper draws coloured **HP/MP bars** (green->yellow->red / blue) in the menu party
+  panel, the Status page, and battle. **Config** is now a settings list -- aspect,
+  **window opacity**, **window colour** (6 presets), text shadow, and **message
+  speed** -- mirrored in the Debug launcher. Dialogue has a **typewriter** reveal
+  (first confirm completes it) and a warm tint distinct from the cool narration
+  telop. Battle gained a `drawWindow`-skinned command window, party HP/MP gauges,
+  and **floating damage / heal numbers**. (Monster/character *battle sprites* still
+  need a toolkit baking pass -- the monster table has no sprite id and no monster
+  textures are baked yet; tracked as a follow-up.)
+
+- **FFD dual Light/Dark party system (5 members each).** Two parties -- Warriors
+  of Light (0) and Darkness (1), up to 5 active each -- with a side selector, after
+  libjniproxy `GetPartyMemberID` (side @+0x21424, member-id arrays @+0x21428) and
+  the entered-roster mask @+0x2172c. `parties_[2]` + `partySide_`; `gameParty_` is
+  the active side's working copy, synced via `commitActiveParty`; `switchSide`
+  swaps. `newGame` seeds both sides; battle write-back, level-ups and item-use all
+  stay on the active side. **FSAV bumped to v6** (persists both parties + active
+  side; v5 saves still load into Light).
+- **FFD-accurate main menu.** Root command list is now the full FFD set -- Item,
+  Magic, Equip, Job, Status, Formation, Config, Save (+ Quit) -- skinned with the
+  FFD window. Magic and Job appear as labelled stub panels; Item/Equip/Status/
+  Config/Save are live. The root menu shows an active-party panel (member name /
+  level / HP / MP) headed *Warriors of Light* or *Darkness*.
+- **Formation tab + debug party control.** The Formation page reorders (hold/swap),
+  adds/removes members from the character roster, and switches the active side
+  (Left/Right). The Debug launcher gained a **Party** side toggle (Formation is the
+  full builder).
+
+### Fixed
+
+- **Screen no longer stuck black after a door/map warp.** Fades are Host-owned
+  and persist across warps (for the fade-out -> warp -> fade-in door idiom), but
+  the warp is handled outside the script VM so the fade-IN half never ran. A
+  completed door warp now ramps the fade back in -- but only when the destination
+  map issued no fade of its own (`fadeGen()` check), so real cutscene blacks are
+  respected. (`main.cpp` warp path, `Host::fadeInAfterWarp`/`fadeGen`.)
+
+### Changed
+
+- **FFD window skin for menus + dialogue.** `Host::drawWindow` reproduces
+  `GameClass::DrawWindow` (libjniproxy 153133-153153): a 3-stop vertical blue
+  gradient (top RGB 63,69,134 -> mid 42,43,102 -> bottom 75,78,122 at alpha 0xa0)
+  with a light frame, replacing the flat rectangles on the command list, the
+  Item/Equip/Status pages, and the message box.
+- **Resolution / aspect-ratio option with reflow.** A new in-game **Config** menu
+  page picks an aspect ratio (Free-form, 4:3, 5:4, 16:9, 16:10, 1:1, and vertical
+  9:16 / 10:16 for a future portrait/Android layout); `Host::setAspect` resizes the
+  window and the UI/HUD/field viewport reflow from the live window size (no
+  letterbox). Also a `--aspect W:H` CLI flag applied at startup, and the **Debug
+  launcher** gained live **Aspect**, **Encounters** and **Fullscreen** (desktop)
+  toggles alongside Scale. Free-form (the current resizable behaviour) stays the
+  default. *(Persistence across launches is a follow-up.)*
+- **Opening narration renders as a full-screen telop, not a dialogue box.** Op
+  `0x01` ScriptSentence is the FieldClass *Sentence* system (libjniproxy
+  `InitSentence`/`DrawSentence` -- accumulating on-screen lines over the scene),
+  distinct from op `0x00` SetMessage (windowed). The VM now routes `0x01` to a
+  new full-screen narration overlay (`Field::inSentence`/`sentenceLines`,
+  host render) instead of the message box, so the prologue reads as the classic
+  blue narration screen. (`event_vm.{h,cpp}`, `field.{h,cpp}`, `host.cpp`.)
+
 ## [0.1.1] - 2026-06-14
 
 ### Added

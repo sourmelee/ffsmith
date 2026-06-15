@@ -38,10 +38,11 @@ static void run_event_depth(const Event& ev, ScriptState& st, const VMEnv& env,
         if (b.empty()) { pc = next; continue; }
         const int op = b[0];
         switch (op) {
-            case 0x00:                                       // SetMessage
-            case 0x01: {                                     // ScriptSentence (cinematic text)
+            case 0x00:                                       // SetMessage -> windowed dialogue box
+            case 0x01: {                                     // ScriptSentence -> full-screen telop (Sentence system)
                 int id = rdW(b, 1);
-                o.messages.push_back(id);
+                if (op == 0x01) o.sentences.push_back(id);    // FieldClass::ScriptSentence: accumulating on-screen lines, no window
+                else            o.messages.push_back(id);
                 std::snprintf(tmp, sizeof(tmp), "blk%d: %s msg=%d", pc,
                               op == 0x00 ? "SetMessage" : "ScriptSentence", id);
                 o.log.push_back(tmp);

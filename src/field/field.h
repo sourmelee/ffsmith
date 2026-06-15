@@ -73,6 +73,10 @@ public:
 
     // events / dialogue / choices
     bool inDialogue() const { return dlgActive_ || choiceActive_; }
+    // ScriptSentence (op 0x01): full-screen narration lines that accumulate and
+    // are dismissed together -- separate from the windowed message box.
+    bool inSentence() const { return sentenceActive_; }
+    const std::vector<int>& sentenceLines() const { return sentences_; }
     int  dialogueMsg() const;
     bool choiceActive() const { return choiceActive_; }
     const std::vector<std::pair<int, int>>& choiceOptions() const { return choice_.options; }
@@ -80,7 +84,7 @@ public:
     void confirm();                              // talk / advance dialogue / pick choice
     void cancel();                               // choice: take the default branch
     Warp consumeWarp() {                         // pending cross-map warp; dialogue/waits first
-        if (dlgActive_ || choiceActive_ || wait_.valid()) return Warp{};
+        if (dlgActive_ || choiceActive_ || sentenceActive_ || wait_.valid()) return Warp{};
         Warp w = warp_; warp_ = Warp{}; return w;
     }
     void setNoClip(bool b) { noClip_ = b; }     // debug: ignore collision
@@ -147,6 +151,8 @@ private:
     std::vector<int> dlgQueue_;
     int dlgIdx_ = 0;
     bool dlgActive_ = false;
+    std::vector<int> sentences_;                 // op 0x01 ScriptSentence: accumulated full-screen narration lines
+    bool sentenceActive_ = false;
     bool choiceActive_ = false;                  // 0x3c pause: pick then resume VM
     VMChoice choice_;
     int choiceSel_ = 0;

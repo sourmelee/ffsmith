@@ -128,7 +128,7 @@ void Field::rescanParallel() {
 }
 
 void Field::pumpAuto() {
-    if (dlgActive_ || choiceActive_ || warp_.valid() || pendingEnc_.valid()
+    if (dlgActive_ || choiceActive_ || sentenceActive_ || warp_.valid() || pendingEnc_.valid()
         || wait_.valid() || autoQueue_.empty()) return;
     const Event* e = autoQueue_.front();
     autoQueue_.erase(autoQueue_.begin());
@@ -159,6 +159,12 @@ void Field::runScript(const Event* e, int startBlock) {
         if (!dlgActive_) { dlgIdx_ = 0; dlgActive_ = true; }
         std::printf("[FFSmith] script (img %d) -> msg %d (+%d)\n",
                     e->img, dlgQueue_[dlgIdx_], (int)o.messages.size() - 1);
+    }
+    if (!o.sentences.empty()) {                  // ScriptSentence: accumulate full-screen narration lines
+        for (int sline : o.sentences) sentences_.push_back(sline);
+        sentenceActive_ = true;
+        std::printf("[FFSmith] script (img %d) -> sentence %d (+%d lines)\n",
+                    e->img, sentences_.front(), (int)o.sentences.size() - 1);
     }
     if (o.hasChoice) {
         pendingEv_ = o.choiceEv ? o.choiceEv : e; choice_ = o.choice; choiceSel_ = 0;
@@ -394,6 +400,10 @@ void Field::confirm() {
         continueChain();
         return;
     }
+    if (sentenceActive_) {                  // dismiss the full-screen narration, then resume
+        sentenceActive_ = false; sentences_.clear();
+        return;
+    }
     if (dlgActive_) {                       // advance / close dialogue
         ++dlgIdx_;
         if (dlgIdx_ >= (int)dlgQueue_.size()) {
@@ -444,7 +454,7 @@ void Field::update(const InputState& in) {
         return;
     }
     if (in.pressed & BTN_CONFIRM) confirm();
-    if (dlgActive_ || choiceActive_) return;   // freeze movement during dialogue
+    if (dlgActive_ || choiceActive_ || sentenceActive_) return;   // freeze movement during dialogue/narration
     if (moving_) {
         prog_ += speed_;
         if (prog_ >= tile_) {

@@ -38,6 +38,14 @@ FFSmith is **~10 days old and already plays a vertical slice of the real game**:
 - Monster EXP/gil offsets (body[6]/body[10] BE u32), §8 EXP thresholds + HP/MP growth (`levels.bin`).
 - New Game start: boot_data §1 scenario record 0 → map 0, map-default spawn (FFM4 header).
 - field_anm character grid (48×48, pitch 50, rows=facing, Right=Left-flipped) and per-sprite object geometry (`spritegeo.bin`).
+- **Message vs narration split (2026-06-14):** op `0x00` SetMessage = windowed dialogue box; op `0x01` ScriptSentence = the FieldClass *Sentence* system (libjniproxy `InitSentence`/`DrawSentence` -- accumulating full-screen telop lines over the scene, no window). The engine now renders `0x01` as a full-screen blue narration overlay (was incorrectly shown in the message box). `Field::inSentence`/`sentenceLines`.
+- **UI polish (2026-06-14):** text drop-shadow + thousands separators; coloured HP/MP gauges (`drawGauge`) in party panel/Status/battle; Config settings list (aspect/opacity/window colour/shadow/message speed, + debug); dialogue typewriter; battle floating damage numbers + skinned command window. Battle sprites still TODO (needs monster-sprite bake).
+- **FFD dual party + menu (2026-06-14):** two parties (Light 0 / Dark 1, up to 5
+each) per libjniproxy `GetPartyMemberID` (side @+0x21424, id arrays @+0x21428,
+roster mask @+0x2172c); `parties_[2]`/`partySide_`/`switchSide`, FSAV v6. Main menu
+is the full FFD set (Magic/Job stubbed), with a Formation tab + active-party panel.
+- **FFD window skin (2026-06-14):** `Host::drawWindow` reproduces `GameClass::DrawWindow` (libjniproxy 153133-153153) -- the 3-stop blue vertical gradient + frame -- on menus, pages and the message box (was flat rects).
+- **Warp fade recovery (2026-06-14):** a door/map warp that followed a fade-out now ramps the fade back in (the script's fade-in half is lost because warps run outside the VM), guarded by `fadeGen()` so genuine cutscene blacks are kept.
 
 ### Approximated / heuristic (MEDIUM — flagged in code comments)
 - **ATB**: gauge += SPD per step, threshold 256, random initial stagger (`pickNextActor`). Original turn scheduler not decoded.

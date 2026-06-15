@@ -13,6 +13,7 @@
 #include <ctime>
 #include <memory>
 #include <string>
+#include <array>
 #include <vector>
 
 using namespace ffsmith;
@@ -41,6 +42,7 @@ static void printUsage(const char* exe) {
         "  --face N        set player facing for --fieldshot (0=D,1=U,2=L,3=R)\n"
         "  --frames N     run N ticks then exit\n"
         "  --scale N      zoom factor (default 3); resize the window to see more map\n"
+        "  --aspect W:H   lock to an aspect ratio (4:3, 16:9, 9:16, ...); UI reflows to fill\n"
         "  --title        boot to the title screen (Start/Z -> field)\n"
         "  --menu         open the field menu (for screenshots)\n"
         "  --debug        boot into the debug launcher (default for windowed)\n"
@@ -184,13 +186,14 @@ static int vmSelfTest() {
 
 struct SaveData { bool ok = false; std::string map; int x = 0, y = 0, facing = 0, img = -1;
                   bool hasState = false; std::vector<GameMember> party; std::vector<InvSlot> inv; int gil = 0;
-                  std::vector<uint8_t> script; };
+                  std::vector<uint8_t> script;
+                  bool dual = false; int partySide = 0; std::array<std::vector<GameMember>, 2> sides; };
 
-static bool writeSave(const std::string& bundle, const std::string& mk, int x, int y, int facing, int img, const Host& host) {
+static bool writeSave(const std::string& bundle, const std::string& mk, int x, int y, int facing, int img, Host& host) {
     FILE* f = std::fopen((bundle + "/save.dat").c_str(), "wb");
     if (!f) return false;
     std::fwrite("FSAV", 1, 4, f);
-    uint8_t ver = 5; std::fwrite(&ver, 1, 1, f);
+    uint8_t ver = 6; std::fwrite(&ver, 1, 1, f);
     uint16_t mlen = (uint16_t)mk.size(); std::fwrite(&mlen, 2, 1, f); std::fwrite(mk.data(), 1, mk.size(), f);
     uint16_t ux = (uint16_t)x, uy = (uint16_t)y; std::fwrite(&ux, 2, 1, f); std::fwrite(&uy, 2, 1, f);
     uint8_t uf = (uint8_t)facing; std::fwrite(&uf, 1, 1, f);
@@ -209,6 +212,18 @@ static bool writeSave(const std::string& bundle, const std::string& mk, int x, i
     auto blob = host.scriptState().serialize();
     uint32_t bl = (uint32_t)blob.size(); std::fwrite(&bl, 4, 1, f);
     std::fwrite(blob.data(), 1, blob.size(), f);
+    // v6: FFD dual party -- active side + both Light/Dark parties.
+    auto wrMember = [&](const GameMember& gm) {
+        int32_t v[3] = { gm.charIdx, gm.hp, gm.mp }; std::fwrite(v, 4, 3, f);
+        int32_t e[6]; for (int k = 0; k < 6; ++k) e[k] = gm.equip[k]; std::fwrite(e, 4, 6, f);
+        int32_t lv[2] = { gm.level, gm.exp }; std::fwrite(lv, 4, 2, f);
+    };
+    uint8_t side = (uint8_t)host.partySide(); std::fwrite(&side, 1, 1, f);
+    const auto& sides = host.parties();
+    for (int sIdx = 0; sIdx < 2; ++sIdx) {
+        uint8_t sc = (uint8_t)sides[sIdx].size(); std::fwrite(&sc, 1, 1, f);
+        for (const auto& gm : sides[sIdx]) wrMember(gm);
+    }
     std::fclose(f);
     std::printf("[FFSmith] saved -> %s/save.dat (%s @%d,%d face %d img %d; party %u, inv %u, gil %d)\n",
                 bundle.c_str(), mk.c_str(), x, y, facing, img, (unsigned)pc, (unsigned)ic, gil);
@@ -242,6 +257,18 @@ static SaveData readSave(const std::string& bundle) {
             if (std::fread(&bl, 4, 1, f) == 1 && bl > 0 && bl < (1u << 20)) {
                 sd.script.resize(bl);
                 if (std::fread(sd.script.data(), 1, bl, f) != bl) sd.script.clear();
+            }
+        }
+        if (ver >= 6) {                                   // v6 dual party trailer
+            auto rdMember = [&]() { GameMember gm; int32_t v[3] = {0,0,0}; std::fread(v, 4, 3, f);
+                gm.charIdx = v[0]; gm.hp = v[1]; gm.mp = v[2];
+                int32_t e[6] = {0,0,0,0,0,0}; std::fread(e, 4, 6, f); for (int k = 0; k < 6; ++k) gm.equip[k] = e[k];
+                int32_t lv[2] = {0,0}; std::fread(lv, 4, 2, f); gm.level = lv[0]; gm.exp = lv[1]; return gm; };
+            uint8_t side = 0; if (std::fread(&side, 1, 1, f) == 1) {
+                sd.partySide = side == 1 ? 1 : 0;
+                for (int sIdx = 0; sIdx < 2; ++sIdx) { uint8_t sc = 0; std::fread(&sc, 1, 1, f);
+                    for (int i = 0; i < sc; ++i) sd.sides[sIdx].push_back(rdMember()); }
+                sd.dual = true;
             }
         }
     }
@@ -308,6 +335,7 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--player")) { const char* v = takeStr(argc, argv, i, ""); std::sscanf(v, "%d,%d", &startCol, &startRow); }
         else if (!std::strcmp(a, "--frames")) cfg.max_frames    = takeInt(argc, argv, i, cfg.max_frames);
         else if (!std::strcmp(a, "--scale"))  cfg.scale         = takeInt(argc, argv, i, cfg.scale);
+        else if (!std::strcmp(a, "--aspect")) { const char* v = takeStr(argc, argv, i, ""); int aw=0,ah=0; if (std::sscanf(v, "%d:%d", &aw, &ah)==2 || std::sscanf(v, "%dx%d", &aw, &ah)==2) { cfg.aspectW=aw; cfg.aspectH=ah; } }
         else if (!std::strcmp(a, "--width"))  cfg.logical_width  = takeInt(argc, argv, i, cfg.logical_width);
         else if (!std::strcmp(a, "--height")) cfg.logical_height = takeInt(argc, argv, i, cfg.logical_height);
         else if (!std::strcmp(a, "--hz"))     cfg.tick_hz        = takeInt(argc, argv, i, cfg.tick_hz);
@@ -506,7 +534,8 @@ int main(int argc, char** argv) {
     host.setDebugData(mapList, spriteList);
     host.loadMenuData(bundle);
     if (loadFlag && bootSave.hasState) {
-        host.setGameParty(bootSave.party); host.setInventory(bootSave.inv); host.setGil(bootSave.gil);
+        if (bootSave.dual) host.setParties(bootSave.sides, bootSave.partySide); else host.setGameParty(bootSave.party);
+        host.setInventory(bootSave.inv); host.setGil(bootSave.gil);
         if (!bootSave.script.empty()) host.scriptState().deserialize(bootSave.script.data(), bootSave.script.size());
         std::printf("[FFSmith] restored party(%zu) inv(%zu) gil=%d script(%zu)\n",
                     bootSave.party.size(), bootSave.inv.size(), bootSave.gil, bootSave.script.size());
@@ -561,7 +590,7 @@ int main(int argc, char** argv) {
                 host.setMapKey(sd.map); curMap = sd.map;
                 if (sd.img >= 0) { host.setPlayerSprite(sd.img, 0); playerImg = sd.img; }
                 field->setFacing(sd.facing); host.setMode(Host::Mode::Field);
-                if (sd.hasState) { host.setGameParty(sd.party); host.setInventory(sd.inv); host.setGil(sd.gil);
+                if (sd.hasState) { if (sd.dual) host.setParties(sd.sides, sd.partySide); else host.setGameParty(sd.party); host.setInventory(sd.inv); host.setGil(sd.gil);
                                    if (!sd.script.empty()) host.scriptState().deserialize(sd.script.data(), sd.script.size()); }
                 std::printf("[FFSmith] loaded %s @%d,%d (party %zu, gil %d)\n", sd.map.c_str(), sd.x, sd.y, sd.party.size(), sd.gil);
             }
@@ -581,8 +610,14 @@ int main(int argc, char** argv) {
         Warp w = field->consumeWarp();
         if (w.valid()) {
             std::string key = find_map_key(bundle, w.map);
+            int fg = host.fadeGen();
             if (!key.empty() && loadInto(key, w.x, w.y, &host)) {
                 host.setMapKey(key);
+                // The fade-out that preceded this door warp is never followed by the
+                // script's fade-in (the warp is handled outside the VM).  If the
+                // destination map ran no fade of its own, ramp back in so we don't
+                // sit on a black screen until the next debug warp.
+                if (host.fadeGen() == fg) host.fadeInAfterWarp();
                 std::printf("[FFSmith] warped to %s @(%d,%d) dir %d\n", key.c_str(), w.x, w.y, w.dir);
             } else
                 std::fprintf(stderr, "[FFSmith] warp target map %d not found\n", w.map);

@@ -11,7 +11,25 @@
 
 namespace ffsmith {
 
-namespace { const char* kMenuItems[] = {"Item", "Equip", "Status", "Save", "Quit"}; const int kMenuN = 5; }
+namespace { const char* kMenuItems[] = {"Item", "Magic", "Equip", "Job", "Status", "Formation", "Config", "Save", "Quit"}; const int kMenuN = 9; }
+// Display aspect presets (name, w, h).  0,0 = free-form resizable window.  Includes
+// vertical ratios for a future portrait/Android layout.
+namespace { struct AspectPreset { const char* name; int w, h; };
+  const AspectPreset kAspects[] = {
+    {"Free-form", 0, 0}, {"4:3", 4, 3}, {"5:4", 5, 4}, {"16:9", 16, 9}, {"16:10", 16, 10},
+    {"1:1", 1, 1}, {"9:16 (vert)", 9, 16}, {"10:16 (vert)", 10, 16} };
+  const int kAspectN = (int)(sizeof(kAspects) / sizeof(kAspects[0])); }
+// Window colour presets: 3-stop vertical gradient (top / mid / bottom RGB).
+// Index 0 = the faithful FFD blue (GameClass::DrawWindow); the rest are tints.
+namespace { struct WinColor { const char* name; int tr,tg,tb, mr,mg,mb, br,bg,bb; };
+  const WinColor kWinColors[] = {
+    {"Blue",    63,69,134, 42,43,102, 75,78,122},
+    {"Teal",    36,96,110, 22,60,74,  46,104,110},
+    {"Purple",  84,58,128, 54,36,92,  96,72,134},
+    {"Crimson", 128,46,58, 90,30,40,  134,64,72},
+    {"Forest",  44,96,60,  28,64,42,  56,104,70},
+    {"Slate",   60,66,80,  40,44,56,  72,78,92} };
+  const int kWinColorN = (int)(sizeof(kWinColors)/sizeof(kWinColors[0])); }
 
 Host::Host(const HostConfig& cfg) : cfg_(cfg) { dbgScale_ = cfg_.scale; }
 
@@ -41,6 +59,7 @@ bool Host::init() {
     if (!renderer_) { std::fprintf(stderr, "[FFSmith] SDL_CreateRenderer failed: %s\n", SDL_GetError()); return false; }
     std::printf("[FFSmith] init ok: window %dx%d, zoom x%d @ %d Hz%s\n",
                 win_w, win_h, cfg_.scale, cfg_.tick_hz, cfg_.max_frames >= 0 ? " (headless)" : "");
+    if (cfg_.aspectW > 0 && cfg_.aspectH > 0) setAspect(cfg_.aspectW, cfg_.aspectH);  // --aspect at startup
     return true;
 }
 
@@ -213,6 +232,7 @@ void Host::wireScriptEnv() {
     // every intro scene OPENS with mode 1 + duration and ENDS with mode 0 +
     // block-until-done right before its warp (m1 ev14/ev18, m200 ev2).
     vmEnv_.setFade = [this](int mode, int r, int g, int b, int ticks) {
+        ++fadeGen_;                                                  // record that a script fade happened (warp recovery checks this)
         fadeR_ = (uint8_t)r; fadeG_ = (uint8_t)g; fadeB_ = (uint8_t)b;
         fadeTarget_ = (mode == 0) ? 255 : 0;
         if (fadeTarget_ == 255 && fadeAlpha_ == 0) fadeAlpha_ = 1;       // start ramp
@@ -322,32 +342,95 @@ bool Host::loadText(const std::string& dir, int bank) {
 
 // Word-wrapped bitmap text from the baked atlas. Honors '\n'; wraps whole words
 // at maxChars; unknown bytes (incl. multibyte UTF-8) render as '?'.
+// Thousands-separated integer (e.g. 12345 -> "12,345"); for gil/EXP displays.
+static std::string commafy(long v) {
+    bool neg = v < 0; unsigned long u = neg ? (unsigned long)(-v) : (unsigned long)v;
+    std::string d = std::to_string(u), out;
+    int c = 0;
+    for (int i = (int)d.size() - 1; i >= 0; --i) { out.push_back(d[i]); if (++c % 3 == 0 && i > 0) out.push_back(','); }
+    if (neg) out.push_back('-');
+    std::reverse(out.begin(), out.end());
+    return out;
+}
+
 void Host::drawText(int x, int y, const std::string& s, int maxChars, uint8_t r, uint8_t g, uint8_t b) {
     if (!fontTex_ || fcw_ <= 0 || maxChars < 1) return;
-    SDL_SetTextureColorMod(fontTex_, r, g, b);
-    int cx = 0, cy = 0;
-    auto put = [&](unsigned char c) {
-        if (c < (unsigned)ffirst_ || c >= (unsigned)(ffirst_ + 95)) c = '?';
-        int gi = (int)c - ffirst_;
-        SDL_Rect src{ (gi % fcols_) * fcw_, (gi / fcols_) * fch_, fcw_, fch_ };
-        SDL_Rect dst{ x + cx * fcw_, y + cy * fch_, fcw_, fch_ };
-        SDL_RenderCopy(renderer_, fontTex_, &src, &dst);
-    };
-    size_t i = 0;
-    while (i < s.size()) {
-        char ch = s[i];
-        if (ch == '\n') { cx = 0; ++cy; ++i; continue; }
-        if (ch == ' ')  { if (++cx >= maxChars) { cx = 0; ++cy; } ++i; continue; }
-        size_t j = i;
-        while (j < s.size() && s[j] != ' ' && s[j] != '\n') ++j;
-        int wl = (int)(j - i);
-        if (cx + wl > maxChars && wl <= maxChars) { cx = 0; ++cy; }
-        for (size_t k = i; k < j; ++k) {
-            if (cx >= maxChars) { cx = 0; ++cy; }
-            put((unsigned char)s[k]); ++cx;
+    auto pass = [&](int ox, int oy, uint8_t cr, uint8_t cg, uint8_t cb) {
+        SDL_SetTextureColorMod(fontTex_, cr, cg, cb);
+        int cx = 0, cy = 0;
+        auto put = [&](unsigned char c) {
+            if (c < (unsigned)ffirst_ || c >= (unsigned)(ffirst_ + 95)) c = '?';
+            int gi = (int)c - ffirst_;
+            SDL_Rect src{ (gi % fcols_) * fcw_, (gi / fcols_) * fch_, fcw_, fch_ };
+            SDL_Rect dst{ ox + cx * fcw_, oy + cy * fch_, fcw_, fch_ };
+            SDL_RenderCopy(renderer_, fontTex_, &src, &dst);
+        };
+        size_t i = 0;
+        while (i < s.size()) {
+            char ch = s[i];
+            if (ch == '\n') { cx = 0; ++cy; ++i; continue; }
+            if (ch == ' ')  { if (++cx >= maxChars) { cx = 0; ++cy; } ++i; continue; }
+            size_t j = i;
+            while (j < s.size() && s[j] != ' ' && s[j] != '\n') ++j;
+            int wl = (int)(j - i);
+            if (cx + wl > maxChars && wl <= maxChars) { cx = 0; ++cy; }
+            for (size_t k = i; k < j; ++k) {
+                if (cx >= maxChars) { cx = 0; ++cy; }
+                put((unsigned char)s[k]); ++cx;
+            }
+            i = j;
         }
-        i = j;
+    };
+    if (textShadow_) pass(x + 1, y + 1, 12, 12, 20);   // drop shadow under the colored text
+    pass(x, y, r, g, b);
+}
+
+// Colored HP/MP gauge.  HP fades green -> yellow -> red as it drains; MP is blue.
+void Host::drawGauge(int x, int y, int w, int h, int cur, int maxv, bool mp) {
+    if (w <= 0 || h <= 0) return;
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer_, 18, 20, 30, 220);
+    SDL_Rect bg{ x, y, w, h }; SDL_RenderFillRect(renderer_, &bg);
+    int c = cur < 0 ? 0 : (cur > maxv ? maxv : cur);
+    int fw = maxv > 0 ? (w - 2) * c / maxv : 0;
+    int r, g, b;
+    if (mp) { r = 80; g = 140; b = 235; }
+    else { double t = maxv > 0 ? (double)c / maxv : 0.0;
+        if (t > 0.5)      { r = 80;  g = 205; b = 90; }
+        else if (t > 0.25){ r = 235; g = 200; b = 70; }
+        else              { r = 225; g = 70;  b = 60; } }
+    if (fw > 0) { SDL_SetRenderDrawColor(renderer_, (Uint8)r, (Uint8)g, (Uint8)b, 255);
+                  SDL_Rect f{ x + 1, y + 1, fw, h - 2 }; SDL_RenderFillRect(renderer_, &f); }
+    SDL_SetRenderDrawColor(renderer_, 150, 165, 200, 180);
+    SDL_RenderDrawRect(renderer_, &bg);
+}
+
+// FFD window skin -- faithful reproduction of GameClass::DrawWindow
+// (libjniproxy.so_new.c 153133-153153): a 3-stop vertical gradient drawn as two
+// half-rects -- top RGB(63,69,134) -> middle RGB(42,43,102) over the upper half,
+// then middle -> bottom RGB(75,78,122) over the lower half -- at the given alpha
+// (the game uses 0xa0), finished with a light frame.  We approximate the gradient
+// with per-row lines and DrawWindowFrame with a light border.
+void Host::drawWindow(int x, int y, int w, int h, int alpha) {
+    if (w <= 0 || h <= 0) return;
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    auto lerp = [](int a, int b, double t) { return (int)(a + (b - a) * t + 0.5); };
+    const WinColor& wc = kWinColors[winColorIdx_ % kWinColorN];
+    int a = std::min(255, std::max(0, alpha * winOpacity_ / 230));   // global opacity scales the per-call alpha
+    const int half = h / 2;
+    for (int row = 0; row < h; ++row) {
+        int r, g, b;
+        if (row < half) { double t = half > 0 ? (double)row / half : 0.0;
+            r = lerp(wc.tr, wc.mr, t); g = lerp(wc.tg, wc.mg, t); b = lerp(wc.tb, wc.mb, t); }
+        else { int den = h - half; double t = den > 0 ? (double)(row - half) / den : 0.0;
+            r = lerp(wc.mr, wc.br, t); g = lerp(wc.mg, wc.bg, t); b = lerp(wc.mb, wc.bb, t); }
+        SDL_SetRenderDrawColor(renderer_, (Uint8)r, (Uint8)g, (Uint8)b, (Uint8)a);
+        SDL_RenderDrawLine(renderer_, x + 1, y + row, x + w - 2, y + row);
     }
+    SDL_SetRenderDrawColor(renderer_, 206, 220, 250, 255);   // light frame (DrawWindowFrame)
+    SDL_Rect fr{ x, y, w, h }; SDL_RenderDrawRect(renderer_, &fr);
+    SDL_SetRenderDrawColor(renderer_, 70, 88, 150, 255);     // subtle inner shade line
+    SDL_Rect ir{ x + 1, y + 1, w - 2, h - 2 }; SDL_RenderDrawRect(renderer_, &ir);
 }
 
 static uint32_t keyToButton(SDL_Keycode k) {
@@ -456,6 +539,18 @@ void Host::update(double /*dt*/) {
     } else if (field_) {
         if (input_.pressed & BTN_MENU) { menuOpen_ = true; menuCursor_ = 0; }
         else {
+            // message typewriter: reveal dialogue text over time; the first confirm
+            // completes the reveal instead of advancing to the next line.
+            if (field_->inDialogue() && !field_->choiceActive()) {
+                int id = field_->dialogueMsg();
+                auto it = messages_.find(id);
+                int full = (it != messages_.end()) ? (int)it->second.size() : 0;
+                if (id != msgRevealId_) { msgRevealId_ = id; msgReveal_ = (msgSpeed_ == 0) ? full : 0; }
+                if (msgReveal_ < full) {
+                    if (input_.pressed & BTN_CONFIRM) { msgReveal_ = full; input_.pressed &= ~BTN_CONFIRM; }
+                    else msgReveal_ = std::min(full, msgReveal_ + (msgSpeed_ == 2 ? 1 : 2));
+                }
+            } else msgRevealId_ = -2;
             field_->update(input_);
             checkFieldHazard();
             if (encountersOn_) maybeRandomEncounter();
@@ -476,10 +571,14 @@ void Host::updateMenu(const InputState& in) {
         if (in.pressed & BTN_CONFIRM) {
             switch (menuCursor_) {
                 case 0: menuPage_ = 1; pageCursor_ = 0; pageScroll_ = 0; menuMsg_.clear(); break;  // Item
-                case 1: menuPage_ = 2; pageChar_ = 0; equipSlot_ = 0; equipSub_ = 0; menuMsg_.clear(); break;  // Equip
-                case 2: menuPage_ = 3; pageChar_ = 0; break;                      // Status
-                case 3: saveReq_ = true; menuOpen_ = false; break;                // Save
-                case 4: running_ = false; break;                                  // Quit
+                case 1: menuPage_ = 5; break;                                     // Magic  (stub)
+                case 2: menuPage_ = 2; pageChar_ = 0; equipSlot_ = 0; equipSub_ = 0; menuMsg_.clear(); break;  // Equip
+                case 3: menuPage_ = 6; break;                                     // Job    (stub)
+                case 4: menuPage_ = 3; pageChar_ = 0; break;                      // Status
+                case 5: menuPage_ = 7; formCursor_ = 0; formHeld_ = -1; formMode_ = 0; break;  // Formation
+                case 6: menuPage_ = 4; configCursor_ = 0; break;                  // Config (display)
+                case 7: saveReq_ = true; menuOpen_ = false; break;                // Save
+                case 8: running_ = false; break;                                  // Quit
                 default: break;
             }
         }
@@ -491,6 +590,58 @@ void Host::updateMenu(const InputState& in) {
             if (in.pressed & BTN_CONFIRM) useItem(pageCursor_);
         }
         if (in.pressed & (BTN_CANCEL | BTN_MENU)) { menuPage_ = 0; menuMsg_.clear(); }
+    } else if (menuPage_ == 5 || menuPage_ == 6) {          // Magic / Job -- stub pages
+        if (in.pressed & (BTN_CANCEL | BTN_MENU | BTN_CONFIRM)) menuPage_ = 0;
+    } else if (menuPage_ == 7) {                            // Formation (active side, up to 5)
+        if (formMode_ == 1) {                              // add-member picker
+            std::vector<int> pool;
+            for (int ci = 0; ci < (int)chars_.size(); ++ci) if (!charInAnyParty(ci)) pool.push_back(ci);
+            int np = (int)pool.size();
+            if (np > 0) {
+                if (in.pressed & BTN_UP)   formPick_ = (formPick_ + np - 1) % np;
+                if (in.pressed & BTN_DOWN) formPick_ = (formPick_ + 1) % np;
+                if ((in.pressed & BTN_CONFIRM) && (int)gameParty_.size() < kPartyMax) {
+                    gameParty_.push_back(makeMember(pool[formPick_])); commitActiveParty(); formMode_ = 0;
+                }
+            }
+            if (in.pressed & (BTN_CANCEL | BTN_MENU)) formMode_ = 0;
+            return;
+        }
+        if (in.pressed & (BTN_LEFT | BTN_RIGHT)) { switchSide(); formCursor_ = 0; formHeld_ = -1; }
+        if (in.pressed & BTN_UP)   formCursor_ = (formCursor_ + kPartyMax - 1) % kPartyMax;
+        if (in.pressed & BTN_DOWN) formCursor_ = (formCursor_ + 1) % kPartyMax;
+        if (in.pressed & BTN_R) {                          // remove member under cursor
+            if (formCursor_ < (int)gameParty_.size()) { gameParty_.erase(gameParty_.begin() + formCursor_);
+                commitActiveParty(); formHeld_ = -1; }
+        }
+        if (in.pressed & BTN_CONFIRM) {
+            bool occupied = formCursor_ < (int)gameParty_.size();
+            if (formHeld_ >= 0) {                          // place / swap the held member
+                if (occupied && formHeld_ < (int)gameParty_.size())
+                    std::swap(gameParty_[formHeld_], gameParty_[formCursor_]);
+                commitActiveParty(); formHeld_ = -1;
+            } else if (occupied) {
+                formHeld_ = formCursor_;                   // pick up to reorder
+            } else if ((int)gameParty_.size() < kPartyMax) {
+                formMode_ = 1; formPick_ = 0;              // empty slot -> add picker
+            }
+        }
+        if (in.pressed & (BTN_CANCEL | BTN_MENU)) { if (formHeld_ >= 0) formHeld_ = -1; else menuPage_ = 0; }
+    } else if (menuPage_ == 4) {                            // Config: settings list
+        const int ROWS = 5;
+        if (in.pressed & BTN_UP)   configCursor_ = (configCursor_ + ROWS - 1) % ROWS;
+        if (in.pressed & BTN_DOWN) configCursor_ = (configCursor_ + 1) % ROWS;
+        int d = (in.pressed & BTN_RIGHT) ? 1 : (in.pressed & BTN_LEFT) ? -1 : 0;
+        bool conf = (in.pressed & BTN_CONFIRM) != 0;
+        switch (configCursor_) {
+            case 0: if (d) { int cur = 0; for (int i = 0; i < kAspectN; ++i) if (kAspects[i].w == cfg_.aspectW && kAspects[i].h == cfg_.aspectH) cur = i;
+                        cur = (cur + d + kAspectN) % kAspectN; setAspect(kAspects[cur].w, kAspects[cur].h); } break;
+            case 1: if (d) winOpacity_ = std::max(80, std::min(255, winOpacity_ + d * 10)); break;   // opacity
+            case 2: if (d || conf) winColorIdx_ = (winColorIdx_ + (d ? d : 1) + kWinColorN) % kWinColorN; break;  // colour
+            case 3: if (d || conf) textShadow_ = !textShadow_; break;                                // shadow
+            case 4: if (d || conf) msgSpeed_ = (msgSpeed_ + (d ? d : 1) + 3) % 3; break;             // message speed
+        }
+        if (in.pressed & (BTN_CANCEL | BTN_MENU)) menuPage_ = 0;
     } else if (menuPage_ == 3) {                            // Status: cycle party member
         int n = (int)gameParty_.size();
         if (n > 0) {
@@ -654,10 +805,7 @@ void Host::render() {
         }
         if (field_->inDialogue()) {
             const int boxH = 68, by = vh - boxH - 4, bx = 6, bw = vw - 12;
-            SDL_SetRenderDrawColor(renderer_, 12, 16, 48, 235);
-            SDL_Rect box{ bx, by, bw, boxH }; SDL_RenderFillRect(renderer_, &box);
-            SDL_SetRenderDrawColor(renderer_, 235, 235, 255, 255);
-            SDL_RenderDrawRect(renderer_, &box);
+            drawWindow(bx, by, bw, boxH, 225);   // FFD message window skin
             const int maxChars = fcw_ > 0 ? (bw - 12) / fcw_ : 30;
             if (field_->choiceActive()) {
                 // 0x3c choice menu: each option value is a message id (the choice line)
@@ -678,8 +826,36 @@ void Host::render() {
                 auto it = messages_.find(id);
                 std::string txt = (it != messages_.end()) ? it->second
                                                            : ("[msg " + std::to_string(id) + "]");
-                drawText(bx + 6, by + 6, txt, maxChars, 255, 255, 255);
+                if (id == msgRevealId_ && msgReveal_ < (int)txt.size())   // typewriter reveal
+                    txt = txt.substr(0, std::max(0, msgReveal_));
+                drawText(bx + 6, by + 6, txt, maxChars, 250, 247, 235);   // warm dialogue tint (vs cool narration)
             }
+        }
+        if (field_->inSentence()) {
+            // op 0x01 ScriptSentence: full-screen telop over the scene (FieldClass
+            // Sentence system, libjniproxy DrawSentence) -- NOT a window. We dim the
+            // backdrop to a deep blue (the classic FF opening narration) and stack
+            // the accumulated lines centred, with a continue prompt.
+            SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(renderer_, 12, 18, 64, 220);
+            SDL_Rect full{ 0, 0, vw, vh }; SDL_RenderFillRect(renderer_, &full);
+            const int maxC = fcw_ > 0 ? (vw - 8) / fcw_ : 30;
+            int y = vh / 3;
+            for (int sid : field_->sentenceLines()) {
+                auto it = messages_.find(sid);
+                std::string txt = (it != messages_.end()) ? it->second : ("[msg " + std::to_string(sid) + "]");
+                size_t i = 0;
+                while (i <= txt.size()) {
+                    size_t nl = txt.find('\n', i);
+                    std::string ln = txt.substr(i, nl == std::string::npos ? std::string::npos : nl - i);
+                    int lx = vw / 2 - (int)ln.size() * fcw_ / 2; if (lx < 4) lx = 4;
+                    drawText(lx, y, ln, maxC, 226, 232, 250);
+                    y += fch_ + 4;
+                    if (nl == std::string::npos) break;
+                    i = nl + 1;
+                }
+            }
+            drawText(vw / 2 - 3 * fcw_, vh - fch_ * 3, "[Z]", 6, 200, 210, 255);
         }
         if (menuOpen_) renderMenu(vw, vh);
         SDL_RenderPresent(renderer_);
@@ -799,33 +975,144 @@ void Host::renderTitle() {
     }
 }
 
+bool Host::charInAnyParty(int charIdx) {
+    commitActiveParty();
+    for (int s = 0; s < 2; ++s) for (const auto& gm : parties_[s]) if (gm.charIdx == charIdx) return true;
+    return false;
+}
+
 void Host::renderMenu(int vw, int vh) {
     if (menuPage_ != 0) {
         int px = 6, py = 6, pw = vw - 12, ph = vh - 12;
-        SDL_SetRenderDrawColor(renderer_, 10, 14, 40, 242);
-        SDL_Rect box{ px, py, pw, ph }; SDL_RenderFillRect(renderer_, &box);
-        SDL_SetRenderDrawColor(renderer_, 235, 235, 255, 255);
-        SDL_RenderDrawRect(renderer_, &box);
+        drawWindow(px, py, pw, ph, 235);     // FFD window skin (full-page menu)
         if (menuPage_ == 1) renderItemPage(px, py, pw, ph);
+        else if (menuPage_ == 4) renderConfigPage(px, py, pw, ph);
+        else if (menuPage_ == 7) renderFormationPage(px, py, pw, ph);
+        else if (menuPage_ == 5 || menuPage_ == 6) {       // Magic / Job stubs
+            drawText(px + 8, py + 4, menuPage_ == 5 ? "MAGIC" : "JOB", 40, 255, 235, 120);
+            drawText(px + 10, py + ph / 2 - fch_, "(not yet implemented)", 40, 210, 215, 235);
+            drawText(px + 10, py + ph / 2 + 2, "coming soon", 40, 150, 160, 190);
+        }
         else                renderCharPage(px, py, pw, ph, menuPage_ == 3);
         drawText(px + pw - 7 * fcw_ - 4, py + ph - fch_ - 2, "X:back", 8, 150, 160, 200);
         return;
     }
-    const int pw = 96, ph = kMenuN * 14 + 12, px = vw - pw - 6, py = 6;
-    SDL_SetRenderDrawColor(renderer_, 12, 16, 48, 238);
-    SDL_Rect box{ px, py, pw, ph }; SDL_RenderFillRect(renderer_, &box);
-    SDL_SetRenderDrawColor(renderer_, 235, 235, 255, 255);
-    SDL_RenderDrawRect(renderer_, &box);
+    // Root: FFD-style command list (right) + active-party panel (left).
+    const int pw = 92, ph = kMenuN * 13 + 12, px = vw - pw - 6, py = 6;
+    drawWindow(px, py, pw, ph, 215);         // FFD window skin (command list)
     for (int i = 0; i < kMenuN; ++i) {
-        int ty = py + 6 + i * 14;
+        int ty = py + 6 + i * 13;
         if (i == menuCursor_) drawText(px + 5, ty, ">", 2, 255, 240, 120);
-        drawText(px + 16, ty, kMenuItems[i], 12, 255, 255, 255);
+        drawText(px + 14, ty, kMenuItems[i], 12, 255, 255, 255);
     }
+    // party panel
+    const int ppx = 6, ppy = 6, ppw = vw - pw - 18, pph = vh - 12;
+    if (ppw > 40) {
+        drawWindow(ppx, ppy, ppw, pph, 215);
+        drawText(ppx + 6, ppy + 4, partySide_ == 0 ? "Warriors of Light" : "Warriors of Darkness",
+                 40, 255, 235, 140);
+        const int maxC = fcw_ > 0 ? (ppw - 12) / fcw_ : 20;
+        int ry = ppy + 4 + fch_ + 3;
+        const int gw = ppw - 16;
+        for (int i = 0; i < (int)gameParty_.size(); ++i) {
+            const GameMember& gm = gameParty_[i];
+            std::string nm = (gm.charIdx >= 0 && gm.charIdx < (int)chars_.size()) ? chars_[gm.charIdx].name : "?";
+            int lvl = gm.level > 0 ? gm.level : 1;
+            int mhp = memberMaxHp(i), mmp = memberMaxMp(i);
+            drawText(ppx + 8, ry, nm + "  L" + std::to_string(lvl), maxC, 235, 240, 255);
+            drawText(ppx + 8, ry + fch_ + 1, "HP " + std::to_string(gm.hp) + "/" + std::to_string(mhp), maxC, 200, 220, 245);
+            drawGauge(ppx + 8, ry + (fch_ + 1) * 2, gw, 3, gm.hp, mhp, false);
+            drawText(ppx + 8, ry + (fch_ + 1) * 2 + 4, "MP " + std::to_string(gm.mp) + "/" + std::to_string(mmp), maxC, 200, 220, 245);
+            drawGauge(ppx + 8, ry + (fch_ + 1) * 3 + 4, gw, 3, gm.mp, mmp, true);
+            ry += (fch_ + 1) * 3 + 11;
+        }
+        if (gameParty_.empty()) drawText(ppx + 10, ppy + pph / 2, "(no party)", 40, 205, 205, 215);
+    }
+}
+
+void Host::renderFormationPage(int px, int py, int pw, int ph) {
+    drawText(px + 8, py + 4, "FORMATION", 40, 255, 235, 120);
+    drawText(px + pw - 18 * fcw_, py + 4, partySide_ == 0 ? "[Light]" : "[Dark]", 20, 235, 235, 150);
+    if (formMode_ == 1) {                                  // add-member picker
+        std::vector<int> pool;
+        for (int ci = 0; ci < (int)chars_.size(); ++ci) if (!charInAnyParty(ci)) pool.push_back(ci);
+        drawText(px + 8, py + 4 + fch_ + 2, "Add member:", 40, 210, 218, 240);
+        int top = py + 4 + (fch_ + 2) * 2;
+        for (int i = 0; i < (int)pool.size() && top + (i + 1) * (fch_ + 2) < py + ph - fch_ * 2; ++i) {
+            int ty = top + i * (fch_ + 2);
+            bool sel = (i == formPick_);
+            if (sel) drawText(px + 6, ty, ">", 2, 255, 240, 120);
+            drawText(px + 16, ty, chars_[pool[i]].name, 30, sel ? 255 : 220, 235, sel ? 150 : 255);
+        }
+        if (pool.empty()) drawText(px + 16, top, "(roster empty)", 30, 205, 205, 215);
+        drawText(px + 8, py + ph - fch_ - 3, "A:add  X:cancel", 40, 160, 185, 150);
+        return;
+    }
+    int top = py + 4 + fch_ + 3;
+    for (int i = 0; i < kPartyMax; ++i) {
+        int ty = top + i * (fch_ + 4);
+        bool sel = (i == formCursor_);
+        bool held = (i == formHeld_);
+        if (sel) drawText(px + 6, ty, held ? "#" : ">", 2, 255, 240, 120);
+        std::string label;
+        if (i < (int)gameParty_.size()) {
+            const GameMember& gm = gameParty_[i];
+            std::string nm = (gm.charIdx >= 0 && gm.charIdx < (int)chars_.size()) ? chars_[gm.charIdx].name : "?";
+            label = nm + "   L" + std::to_string(gm.level > 0 ? gm.level : 1)
+                  + "  HP " + std::to_string(gm.hp) + "/" + std::to_string(memberMaxHp(i));
+        } else label = "---";
+        drawText(px + 16, ty, label, 36, held ? 255 : (sel ? 255 : 215), held ? 220 : 235, held ? 120 : (sel ? 150 : 255));
+    }
+    drawText(px + 8, py + ph - fch_ - 3, "A:hold/swap/add  R:remove  </>:side  X:back", 64, 160, 185, 150);
+}
+
+// Resize the window to a chosen aspect ratio.  The renderer derives its logical
+// viewport from the window size each frame (vw = winW/scale), so the menus, HUD and
+// field viewport all reflow to fill the new shape -- no letterbox.  0,0 keeps the
+// window free-form (the default).  We pick a clean logical size for the aspect
+// (short side ~180 px) and size the OS window to logical x scale.
+void Host::setAspect(int w, int h) {
+    cfg_.aspectW = w; cfg_.aspectH = h;
+    if (w <= 0 || h <= 0) {                       // free-form: leave the current size
+        std::printf("[FFSmith] display: free-form window\n");
+        return;
+    }
+    const int S = 180;                            // short-side logical pixels
+    int lw, lh;
+    if (w >= h) { lh = S; lw = (S * w + h / 2) / h; }   // landscape -> height is the short side
+    else        { lw = S; lh = (S * h + w / 2) / w; }   // portrait  -> width is the short side
+    cfg_.logical_width = lw; cfg_.logical_height = lh;
+    const int sc = cfg_.scale < 1 ? 1 : cfg_.scale;
+    if (window_) SDL_SetWindowSize(window_, lw * sc, lh * sc);
+    std::printf("[FFSmith] display: aspect %d:%d -> logical %dx%d (window %dx%d)\n",
+                w, h, lw, lh, lw * sc, lh * sc);
+}
+
+void Host::renderConfigPage(int px, int py, int pw, int ph) {
+    drawText(px + 8, py + 4, "CONFIG", 40, 255, 235, 120);
+    const char* aspName = "Free-form";
+    for (int i = 0; i < kAspectN; ++i) if (kAspects[i].w == cfg_.aspectW && kAspects[i].h == cfg_.aspectH) aspName = kAspects[i].name;
+    static const char* spd[3] = { "Instant", "Normal", "Slow" };
+    std::string rows[5] = {
+        std::string("Aspect:        < ") + aspName + " >",
+        std::string("Window opacity:< ") + std::to_string(winOpacity_ * 100 / 255) + "% >",
+        std::string("Window colour: < ") + kWinColors[winColorIdx_ % kWinColorN].name + " >",
+        std::string("Text shadow:   < ") + (textShadow_ ? "On" : "Off") + " >",
+        std::string("Message speed: < ") + spd[msgSpeed_ % 3] + " >",
+    };
+    int top = py + 4 + fch_ + 4;
+    for (int i = 0; i < 5; ++i) {
+        int ty = top + i * (fch_ + 4);
+        bool sel = (i == configCursor_);
+        if (sel) drawText(px + 6, ty, ">", 2, 255, 240, 120);
+        drawText(px + 16, ty, rows[i], 40, sel ? 255 : 225, 235, sel ? 150 : 255);
+    }
+    drawText(px + 8, py + ph - fch_ - 3, "</> change   X:back", 40, 160, 185, 150);
 }
 
 void Host::renderItemPage(int px, int py, int pw, int ph) {
     drawText(px + 8, py + 4, "ITEMS", 40, 255, 235, 120);
-    std::string g = std::to_string(gil_) + " G";
+    std::string g = commafy(gil_) + " G";
     drawText(px + pw - (int)g.size() * fcw_ - 6, py + 4, g, 12, 235, 225, 150);
     int n = (int)inventory_.size();
     int maxChars = fcw_ > 0 ? (pw - 20) / fcw_ : 30;
@@ -869,16 +1156,22 @@ void Host::renderCharPage(int px, int py, int pw, int ph, bool status) {
     std::string hdr = "<  " + c.name + "  >   (" + std::to_string(pc + 1) + "/" + std::to_string(gameParty_.size()) + ")";
     drawText(px + 8, py + 22, hdr, maxChars, 255, 255, 160);
     if (status) {
-        drawText(px + 10, py + 42, "Lv " + std::to_string(c.level)
-                 + "   HP " + std::to_string(gm.hp) + "/" + std::to_string(memberMaxHp(pc))
-                 + "   MP " + std::to_string(gm.mp) + "/" + std::to_string(memberMaxMp(pc)), maxChars, 235, 235, 255);
-        drawText(px + 10, py + 42 + fch_ * 2, "STR " + std::to_string(c.str) + "      SPD " + std::to_string(c.spd), maxChars, 230, 235, 255);
-        drawText(px + 10, py + 42 + fch_ * 3, "VIT " + std::to_string(c.vit) + "   INT " + std::to_string(c.intl) + "   MND " + std::to_string(c.mnd), maxChars, 230, 235, 255);
+        int mhp = memberMaxHp(pc), mmp = memberMaxMp(pc);
+        drawText(px + 10, py + 42, "Lv " + std::to_string(gm.level > 0 ? gm.level : c.level), maxChars, 235, 235, 255);
+        drawText(px + 10, py + 42 + fch_ + 1, "HP " + std::to_string(gm.hp) + "/" + std::to_string(mhp), maxChars, 220, 235, 255);
+        drawGauge(px + 10, py + 42 + fch_ * 2 + 1, pw - 28, 4, gm.hp, mhp, false);
+        drawText(px + 10, py + 42 + fch_ * 3 + 2, "MP " + std::to_string(gm.mp) + "/" + std::to_string(mmp), maxChars, 220, 235, 255);
+        drawGauge(px + 10, py + 42 + fch_ * 4 + 2, pw - 28, 4, gm.mp, mmp, true);
+        // job-derived battle attributes (memberStat) -- matches what battle uses
+        drawText(px + 10, py + 42 + fch_ * 5 + 4, "STR " + std::to_string(memberStat(pc, 0))
+                 + "   SPD " + std::to_string(memberStat(pc, 1)), maxChars, 230, 235, 255);
+        drawText(px + 10, py + 42 + fch_ * 6 + 4, "VIT " + std::to_string(memberStat(pc, 2))
+                 + "   INT " + std::to_string(memberStat(pc, 3)) + "   MND " + std::to_string(memberStat(pc, 4)), maxChars, 230, 235, 255);
         int w0 = gm.equip[0];
         std::string wpn = (w0 > 0 && items_.count(w0)) ? items_[w0].name : std::string("-");
-        drawText(px + 10, py + 42 + fch_ * 5, "Weapon: " + wpn, maxChars, 200, 220, 255);
+        drawText(px + 10, py + 42 + fch_ * 8 + 4, "Weapon: " + wpn, maxChars, 200, 220, 255);
     } else {
-        static const char* SLOT[6] = { "Weapon", "Off-hand", "Head", "Body", "Arms", "Acc." };
+        static const char* SLOT[6] = { "Weapon", "Off-hand", "Head", "Body", "Accessory", "-" };  // FFD 5 slots (R/L hand, head, body, accessory)
         int top = py + 40;
         for (int k = 0; k < 6; ++k) {
             int ty = top + k * (fch_ + 2);
@@ -966,7 +1259,7 @@ bool Host::consumeDebugStart(DebugStart& out) {
 void Host::updateDebug(const InputState& in) {
     if (dbgMapIdx_ < 0) dbgMapIdx_ = 0;
     if (dbgSprIdx_ < 0) dbgSprIdx_ = 0;
-    const int N = 10;
+    const int N = 16;
     if (in.pressed & BTN_UP)   dbgRow_ = (dbgRow_ + N - 1) % N;
     if (in.pressed & BTN_DOWN) dbgRow_ = (dbgRow_ + 1) % N;
     int dir = (in.pressed & BTN_RIGHT) ? 1 : (in.pressed & BTN_LEFT) ? -1 : 0;
@@ -983,9 +1276,24 @@ void Host::updateDebug(const InputState& in) {
         case 6: if (dir || conf) dbgOverlay_ = !dbgOverlay_; break;
         case 7: if (dir || conf) dbgHud_ = !dbgHud_; break;
         case 8: if (dir) { dbgScale_ = std::max(1, std::min(8, dbgScale_ + dir)); cfg_.scale = dbgScale_; } break;
+        case 9: if (dir || conf) {                                  // Aspect ratio (live reflow)
+                    dbgAspect_ = cyc(dbgAspect_, dir ? dir : 1, kAspectN);
+                    setAspect(kAspects[dbgAspect_].w, kAspects[dbgAspect_].h);
+                } break;
+        case 10: if (dir || conf) { encountersOn_ = !encountersOn_; } break;  // random encounters
+        case 11: if (dir || conf) {                                 // desktop fullscreen
+                    dbgFullscreen_ = !dbgFullscreen_;
+                    if (window_) SDL_SetWindowFullscreen(window_, dbgFullscreen_ ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+                } break;
+        case 12: if (dir) winOpacity_ = std::max(80, std::min(255, winOpacity_ + dir * 10)); break;  // window opacity
+        case 13: if (dir || conf) winColorIdx_ = (winColorIdx_ + (dir ? dir : 1) + kWinColorN) % kWinColorN; break;  // window colour
+        case 14: if (dir || conf) {                                 // active party side (Formation = full builder)
+                    if (gameParty_.empty() && parties_[0].empty() && parties_[1].empty()) newGame();
+                    switchSide();
+                } break;
         default: break;
     }
-    if (conf && dbgRow_ == 9) dbgStart_ = true;
+    if (conf && dbgRow_ == 15) dbgStart_ = true;
 }
 
 void Host::renderDebug() {
@@ -1002,7 +1310,7 @@ void Host::renderDebug() {
     if (dbgSprIdx_ < 0) dbgSprIdx_ = 0;
     std::string mapName = (dbgMapIdx_ >= 0 && dbgMapIdx_ < (int)dbgMaps_.size()) ? dbgMaps_[dbgMapIdx_] : std::string("(no maps)");
     int sprId = (dbgSprIdx_ >= 0 && dbgSprIdx_ < (int)dbgSprites_.size()) ? dbgSprites_[dbgSprIdx_] : -1;
-    std::string rows[10] = {
+    std::string rows[16] = {
         "Map:       < " + mapName + " >   (" + std::to_string(dbgMapIdx_ + 1) + "/" + std::to_string(dbgMaps_.size()) + ")",
         "Character: < fldchr" + std::to_string(sprId) + " >",
         "Spawn X:   < " + std::to_string(dbgX_) + " >",
@@ -1012,15 +1320,21 @@ void Host::renderDebug() {
         std::string("Collision: < ") + (dbgOverlay_ ? "On" : "Off") + " >",
         std::string("HUD:       < ") + (dbgHud_ ? "On" : "Off") + " >",
         std::string("Scale:     < ") + std::to_string(dbgScale_) + "x >",
+        std::string("Aspect:    < ") + kAspects[dbgAspect_ % kAspectN].name + " >",
+        std::string("Encounters:< ") + (encountersOn_ ? "On" : "Off") + " >",
+        std::string("Fullscreen:< ") + (dbgFullscreen_ ? "On" : "Off") + " >",
+        std::string("Win opacity:< ") + std::to_string(winOpacity_ * 100 / 255) + "% >",
+        std::string("Win colour:< ") + kWinColors[winColorIdx_ % kWinColorN].name + " >",
+        std::string("Party:     < ") + (partySide_ == 0 ? "Light" : "Dark") + " >  (Formation = full builder)",
         std::string("START"),
     };
     int x = 12, y = 10;
     drawText(x, y, "FFSmith  -  Debug Launcher", 60, 255, 235, 120);
     y += 22;
-    for (int i = 0; i < 10; ++i) {
-        int ry = y + i * 13 + (i == 9 ? 8 : 0);
+    for (int i = 0; i < 16; ++i) {
+        int ry = y + i * 11 + (i == 15 ? 6 : 0);
         if (i == dbgRow_) drawText(x, ry, ">", 2, 255, 240, 120);
-        bool start = (i == 9);
+        bool start = (i == 15);
         drawText(x + 12, ry, rows[i], 64, start ? 255 : 230, 235, start ? 120 : 255);
     }
     drawText(x, vh - 13, "arrows move/change  .  L/R jump 10  .  Z toggle/START  .  (F1 menu, F2 noclip)",
@@ -1168,19 +1482,40 @@ int Host::memberStat(int i, int which) const {
     return std::max(1, which==0?c->str : which==1?c->spd : which==2?c->vit : which==3?c->intl : c->mnd);
 }
 
+GameMember Host::makeMember(int charIdx) const {
+    GameMember m; m.charIdx = charIdx;
+    if (charIdx >= 0 && charIdx < (int)chars_.size()) {
+        const CharRec& c = chars_[charIdx];
+        m.hp = c.hp > 0 ? c.hp : 30; m.mp = c.mp;
+        for (int k = 0; k < 6; ++k) m.equip[k] = c.equip[k];
+        m.level = c.level > 0 ? c.level : 1;
+    } else { m.hp = 30; m.level = 1; }
+    m.exp = levels_.valid() ? (int)levels_.expForLevel(m.level) : 0;
+    return m;
+}
+
 void Host::newGame() {
     clearFade();
-    gameParty_.clear();
-    int n = std::min((int)chars_.size(), 4);
-    for (int i = 0; i < n; ++i) {
-        GameMember m; m.charIdx = i; m.hp = chars_[i].hp > 0 ? chars_[i].hp : 30; m.mp = chars_[i].mp;
-        for (int k = 0; k < 6; ++k) m.equip[k] = chars_[i].equip[k];   // starting gear from chara_set
-        m.level = chars_[i].level > 0 ? chars_[i].level : 1;
-        m.exp = levels_.valid() ? (int)levels_.expForLevel(m.level) : 0;   // start EXP = threshold for the level
-        gameParty_.push_back(m);
-    }
+    // FFD: two parties of up to kPartyMax.  Warriors of Light take the first roster
+    // slots (Sol & co), Warriors of Darkness the next.  Both are debug/Formation
+    // editable; the active side starts on Light.
+    parties_[0].clear(); parties_[1].clear();
+    int n = (int)chars_.size();
+    for (int i = 0; i < kPartyMax && i < n; ++i) parties_[0].push_back(makeMember(i));
+    for (int i = 0; i < kPartyMax && (kPartyMax + i) < n; ++i) parties_[1].push_back(makeMember(kPartyMax + i));
+    partySide_ = 0;
+    gameParty_ = parties_[0];
     inventory_ = { {420, 5}, {426, 2}, {21, 1}, {22, 1}, {295, 1}, {237, 1}, {215, 1}, {408, 1} };  // Potions + Phoenix Down + spare gear
     gil_ = 500;
+}
+
+// Swap the active party between Warriors of Light (0) and Darkness (1).
+void Host::switchSide() {
+    commitActiveParty();
+    partySide_ ^= 1;
+    gameParty_ = parties_[partySide_];
+    std::printf("[FFSmith] active party -> %s (%zu members)\n",
+                partySide_ == 0 ? "Light" : "Dark", gameParty_.size());
 }
 
 std::string Host::awardBattleRewards() {
@@ -1189,7 +1524,7 @@ std::string Host::awardBattleRewards() {
     long totExp = 0, totGil = 0;
     for (const auto& e : enemies_) { totExp += e.exp; totGil += e.gil; }
     gil_ = (int)std::min<long>(9999999, (long)gil_ + totGil);
-    std::string msg = "Win!  +" + std::to_string(totExp) + " EXP  +" + std::to_string(totGil) + " G";
+    std::string msg = "Win!  +" + commafy(totExp) + " EXP  +" + commafy(totGil) + " G";
     std::string ups;
     for (auto& gm : gameParty_) {
         if (gm.hp <= 0) continue;                                   // KO'd members earn nothing
@@ -1218,6 +1553,7 @@ void Host::endBattle() {                                    // persist battle HP
         gameParty_[i].hp = std::max(0, party_[i].hp);
         gameParty_[i].mp = std::max(0, party_[i].mp);
     }
+    commitActiveParty();                                    // keep the active side's stored copy in sync
     mode_ = Mode::Field;
     if (scriptBattle_) {
         scriptBattle_ = false; battleNoEscape_ = false;
@@ -1255,7 +1591,7 @@ void Host::startFormationBattle(const VMEncounter& enc) {
         if (field_) field_->resumeAfterBattle();
         return;
     }
-    enemies_.clear(); rewardsGiven_ = false;
+    enemies_.clear(); rewardsGiven_ = false; floats_.clear();
     for (const auto& fe : fm->enemies) {
         const Monster* m = nullptr;
         for (const auto& mm : monsters_) if (mm.id == fe.id) { m = &mm; break; }
@@ -1430,7 +1766,7 @@ void Host::selfTestLevel() {
     GameMember& gm = gameParty_[0];
     std::printf("[leveltest] %s  L%d  exp%d  HP%d/%d  gil%d\n",
                 chars_[gm.charIdx].name.c_str(), gm.level, gm.exp, gm.hp, memberMaxHp(0), gil_);
-    enemies_.clear(); rewardsGiven_ = false;                       // synthetic enemy worth a couple levels
+    enemies_.clear(); rewardsGiven_ = false; floats_.clear();       // synthetic enemy worth a couple levels
     Combatant e; e.exp = (long)levels_.expForLevel(gm.level + 2) - gm.exp + 5; e.gil = 120; enemies_.push_back(e);
     awardBattleRewards();
     std::printf("[leveltest] -> %s  L%d  exp%d  HP%d/%d  gil%d\n",
@@ -1504,7 +1840,7 @@ void Host::selfTestEquip() {
     if (gameParty_.empty()) newGame();
     pageChar_ = 0;                                   // Sol
     GameMember& gm = gameParty_[0];
-    static const char* SLOT[6] = { "Weapon", "Off-hand", "Head", "Body", "Arms", "Acc." };
+    static const char* SLOT[6] = { "Weapon", "Off-hand", "Head", "Body", "Accessory", "-" };  // FFD 5 slots (R/L hand, head, body, accessory)
     for (int sl = 0; sl < 6; ++sl) {
         buildEquipCandidates(sl);
         std::printf("[equiptest] slot%d %-8s fits:", sl, SLOT[sl]);
@@ -1628,7 +1964,7 @@ void Host::useItem(int invIdx) {
 }
 
 void Host::startBattle(int leadId) {
-    enemies_.clear(); rewardsGiven_ = false;
+    enemies_.clear(); rewardsGiven_ = false; floats_.clear();
     const Monster* lead = nullptr;
     if (leadId >= 0) for (const auto& m : monsters_) if (m.id == leadId) { lead = &m; break; }
     if (!lead && !monsters_.empty()) {                       // random encounter -> a weak-ish lead
@@ -1812,10 +2148,12 @@ void Host::renderBattle() {
         std::string ln = c.name + " " + std::to_string(std::max(0, c.hp)) + "/" + std::to_string(c.maxhp) + (c.maxmp > 0 ? "  M" + std::to_string(c.mp) : "");
         Uint8 g = c.hp > 0 ? 230 : 110, b = c.hp > 0 ? 255 : 110;
         drawText(10, ty, ln, vw / 2 / (fcw_ > 0 ? fcw_ : 8), 235, g, b);
+        int gW = 26, gX = vw / 2 - gW - 4;             // inline HP/MP gauges
+        drawGauge(gX, ty + 1, gW, 2, c.hp, c.maxhp, false);
+        if (c.maxmp > 0) drawGauge(gX, ty + 4, gW, 2, c.mp, c.maxmp, true);
     }
     int rx = vw / 2 + 2, ry = sceneH + 2, rw = vw / 2 - 6, rh = vh - sceneH - 4;
-    SDL_SetRenderDrawColor(renderer_, 12, 16, 48, 238); SDL_Rect cb{ rx, ry, rw, rh }; SDL_RenderFillRect(renderer_, &cb);
-    SDL_SetRenderDrawColor(renderer_, 235, 235, 255, 255); SDL_RenderDrawRect(renderer_, &cb);
+    drawWindow(rx, ry, rw, rh, 235);               // FFD-skinned battle command window
     if (btlPhase_ == 0) {
         static const char* cmd[4] = { "Attack", "Magic", "Defend", "Run" };
         for (int i = 0; i < 4; ++i) {
@@ -1838,6 +2176,25 @@ void Host::renderBattle() {
     } else {
         drawText(rx + 6, ry + 5, btlMsg_, rw / (fcw_ > 0 ? fcw_ : 8) - 1, 235, 235, 200);
         drawText(rx + rw - 3 * fcw_ - 5, ry + rh - fch_ - 3, "-Z-", 4, 150, 160, 200);
+    }
+    // floating damage / heal numbers: rise and fade, then expire
+    {
+        int fn = (int)enemies_.size(); if (fn < 1) fn = 1;
+        int eg = 4, ebw = (vw - eg * (fn + 1)) / fn; if (ebw < 40) ebw = 40;
+        for (auto it = floats_.begin(); it != floats_.end(); ) {
+            int cx, cy;
+            if (it->enemy) { int i = it->idx < 0 ? 0 : it->idx; cx = eg + i * (ebw + eg) + ebw / 2; cy = 18; }
+            else { cx = vw / 4; cy = sceneH + 3 + it->idx * fch_; }
+            cy -= it->age / 2 + 2;
+            std::string t = (it->heal ? "+" : "") + std::to_string(it->value);
+            int br = 255 - (it->age * 5 < 170 ? it->age * 5 : 170);
+            Uint8 r, g, b;
+            if (it->heal) { r = 130; g = (Uint8)(br < 150 ? 150 : br); b = 130; }
+            else          { r = (Uint8)(br < 170 ? 170 : br); g = (Uint8)(br < 120 ? 120 : br - 30); b = 90; }
+            drawText(cx - (int)t.size() * fcw_ / 2, cy, t, 8, r, g, b);
+            ++it->age;
+            if (it->age > 36) it = floats_.erase(it); else ++it;
+        }
     }
 }
 

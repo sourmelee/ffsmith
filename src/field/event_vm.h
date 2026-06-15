@@ -35,6 +35,7 @@ struct VMTeleport { int id = -1, x = -1, y = -1, dir = -1; };
 
 struct VMOut {
     std::vector<int> messages;       // SetMessage ids, in execution order
+    std::vector<int> sentences;      // ScriptSentence ids (op 0x01) -- full-screen telop, NOT a window
     std::vector<std::string> log;    // human-readable action trace
     bool sawEnd = false;
     int  warpMap = -1, warpX = 0, warpY = 0, warpDir = -1;
