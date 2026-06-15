@@ -285,18 +285,20 @@ SDL_Texture* Host::spriteTex(int img, int var, int& w, int& h) {
     return tex;
 }
 
-// Cached monster battle-sprite strip (tex/mon{sprite}.tex = nframes frames side by side).
-SDL_Texture* Host::monTex(int sprite, int& w, int& h) {
-    auto it = monSprites_.find(sprite);
+// Cached monster battle sprite (tex/mon{group}_{variant}.tex = one static image;
+// the FFD mon{N}_{M}.png "variants" are different monsters/recolors, not frames).
+SDL_Texture* Host::monTex(int group, int variant, int& w, int& h) {
+    int key = group * 1000 + variant;
+    auto it = monSprites_.find(key);
     if (it != monSprites_.end()) { if (it->second) SDL_QueryTexture(it->second, nullptr, nullptr, &w, &h); return it->second; }
-    char path[512]; std::snprintf(path, sizeof(path), "%s/tex/mon%d.tex", bundleDir_.c_str(), sprite);
+    char path[512]; std::snprintf(path, sizeof(path), "%s/tex/mon%d_%d.tex", bundleDir_.c_str(), group, variant);
     Texture t = load_tex(path);
     SDL_Texture* tex = nullptr;
     if (t.valid()) {
         tex = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, t.w, t.h);
         if (tex) { SDL_UpdateTexture(tex, nullptr, t.rgba.data(), t.w * 4); SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND); }
     }
-    monSprites_[sprite] = tex;
+    monSprites_[key] = tex;
     if (tex) { w = t.w; h = t.h; }
     return tex;
 }
@@ -2153,18 +2155,16 @@ void Host::renderBattle() {
         int cx = i * slotW + slotW / 2;
         SDL_Rect dst{ cx - 16, spriteBottom - 24, 32, 24 };   // fallback rect if no sprite
         int tw = 0, th = 0;
-        SDL_Texture* mt = (e.sprite >= 0 && e.frames > 0) ? monTex(e.sprite, tw, th) : nullptr;
-        if (mt && th > 0) {
-            int fw = tw / std::max(1, e.frames);
-            int frame = (battleAnim_ / 8) % std::max(1, e.frames);
+        SDL_Texture* mt = (e.sprite >= 0 && e.sprite < 0xffff) ? monTex(e.sprite, e.frames, tw, th) : nullptr;
+        if (mt && tw > 0 && th > 0) {
             double maxw = std::min(slotW - 6, 112), maxh = sceneH * 0.7;
-            double scl = std::min(maxw / std::max(1, fw), maxh / th); if (scl > 2.0) scl = 2.0; if (scl <= 0) scl = 1.0;
-            int dw = (int)(fw * scl), dh = (int)(th * scl);
-            SDL_Rect src{ frame * fw, 0, fw, th };
-            dst = SDL_Rect{ cx - dw / 2, spriteBottom - dh, dw, dh };
+            double scl = std::min(maxw / tw, maxh / th); if (scl > 2.0) scl = 2.0; if (scl <= 0) scl = 1.0;
+            int dw = (int)(tw * scl), dh = (int)(th * scl);
+            int bob = (battleAnim_ / 6 + i) % 4; if (bob > 2) bob = 4 - bob;   // gentle idle bob (0,1,2,1), no flicker
+            dst = SDL_Rect{ cx - dw / 2, spriteBottom - dh + bob, dw, dh };
             SDL_SetTextureColorMod(mt, dead ? 90 : 255, dead ? 90 : 255, dead ? 90 : 255);
             SDL_SetTextureAlphaMod(mt, dead ? 110 : 255);
-            SDL_RenderCopy(renderer_, mt, &src, &dst);
+            SDL_RenderCopy(renderer_, mt, nullptr, &dst);   // whole image (single static sprite)
             SDL_SetTextureColorMod(mt, 255, 255, 255); SDL_SetTextureAlphaMod(mt, 255);
         }
         if (tgt) {                                    // target marker: highlight box + a small caret above

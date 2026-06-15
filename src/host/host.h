@@ -133,7 +133,7 @@ private:
     void render();
     bool ensureMapTexture(const Texture& img);
     SDL_Texture* spriteTex(int img, int var, int& w, int& h);  // cached fldchr sheet
-    SDL_Texture* monTex(int sprite, int& w, int& h);           // cached tex/mon{sprite}.tex idle strip
+    SDL_Texture* monTex(int group, int variant, int& w, int& h); // cached tex/mon{group}_{variant}.tex (single image)
     bool drawSprite(int img, int var, int facing, int animCol, int lx, int ly, int tile);
     void updateMenu(const InputState& in);
     void renderTitle();

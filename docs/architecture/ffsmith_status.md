@@ -39,7 +39,7 @@ FFSmith is **~10 days old and already plays a vertical slice of the real game**:
 - New Game start: boot_data §1 scenario record 0 → map 0, map-default spawn (FFM4 header).
 - field_anm character grid (48×48, pitch 50, rows=facing, Right=Left-flipped) and per-sprite object geometry (`spritegeo.bin`).
 - **Message vs narration split (2026-06-14):** op `0x00` SetMessage = windowed dialogue box; op `0x01` ScriptSentence = the FieldClass *Sentence* system (libjniproxy `InitSentence`/`DrawSentence` -- accumulating full-screen telop lines over the scene, no window). The engine now renders `0x01` as a full-screen blue narration overlay (was incorrectly shown in the message box). `Field::inSentence`/`sentenceLines`.
-- **Monster battle sprites (2026-06-15):** real `mon{body[0]}` sprites, idle-animated, drawn in battle (`monTex` + FMN2 `sprite`/`frames`, `tex/mon{}.tex` strips). Character battle sprites (btlanm_sp) still TODO.
+- **Monster battle sprites (2026-06-15):** real `mon{group}_{variant}` sprites (group=BE-u16 body[56..57], variant=body[58]; `SetBtlEnemyModel`), one static image per monster, drawn in battle with a gentle idle bob (`monTex` + FMN2 group/variant). Character battle sprites (btlanm_sp) still TODO.
 - **UI polish (2026-06-14):** text drop-shadow + thousands separators; coloured HP/MP gauges (`drawGauge`) in party panel/Status/battle; Config settings list (aspect/opacity/window colour/shadow/message speed, + debug); dialogue typewriter; battle floating damage numbers + skinned command window. Battle sprites still TODO (needs monster-sprite bake).
 - **FFD dual party + menu (2026-06-14):** two parties (Light 0 / Dark 1, up to 5
 each) per libjniproxy `GetPartyMemberID` (side @+0x21424, id arrays @+0x21428,

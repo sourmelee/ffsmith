@@ -31,12 +31,15 @@ not this log.
 
 ### Added
 
-- **Animated monster battle sprites.** Enemies now render as their real FFD
-  sprites (`tex/mon{sprite}.tex`, sprite set = monster `body[0]`), idle-animated
-  (frame = timer % nframes), positioned in the battle scene with name + HP bar +
-  target caret. `Monster`/`Combatant` carry `sprite`/`frames`; `monTex` caches the
-  strip; FMN2 loader reads the new fields. Falls back to the text box if a sprite
-  is missing. (Character battle sprites next.)
+- **Monster battle sprites.** Enemies now render as their real FFD sprites,
+  `tex/mon{group}_{variant}.tex` where **group = BE-u16 `body[56..57]`** and
+  **variant = `body[58]`** (`SetBtlEnemyModel` `mon%d_%d`). Each `(group,variant)`
+  is ONE static image -- the `mon{N}_{M}.png` "variants" are distinct monsters /
+  recolours, not animation frames -- drawn with a gentle idle bob (no frame-cycling).
+  Positioned in the battle scene with name + HP bar + target caret; falls back to
+  the text box if missing. `Monster`/`Combatant` carry the group/variant; `monTex`
+  caches per `(group,variant)`. *(Earlier same-day work mis-read `body[0]` as the
+  sprite set, which flickered through palette variants -- corrected here.)*
 
 ## [0.1.2] - 2026-06-14
 
