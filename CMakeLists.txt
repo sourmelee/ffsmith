@@ -1,6 +1,6 @@
 # FFSmith — clean-room engine for Final Fantasy Dimensions / Final Fantasy Legends
 cmake_minimum_required(VERSION 3.16)
-project(FFSmith VERSION 0.1.3 LANGUAGES CXX)  # keep in sync with src/version.h FFSMITH_VERSION
+project(FFSmith VERSION 0.2.0 LANGUAGES CXX)  # keep in sync with src/version.h FFSMITH_VERSION
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

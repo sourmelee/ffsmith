@@ -414,15 +414,39 @@ LevelTable load_levels(const std::string& path) {
 std::unordered_map<int, SpriteGeo> load_spritegeo(const std::string& path) {
     std::unordered_map<int, SpriteGeo> out;
     auto buf = read_file(path);
-    if (buf.size() < 6 || std::memcmp(buf.data(), "FSGE", 4) != 0) return out;
+    if (buf.size() < 6) return out;
+    bool fsg2 = std::memcmp(buf.data(), "FSG2", 4) == 0;
+    bool fsge = std::memcmp(buf.data(), "FSGE", 4) == 0;
+    if (!fsg2 && !fsge) return out;
     int n = rd_u16(&buf[4]); size_t o = 6;
-    for (int i = 0; i < n && o + 15 <= buf.size(); ++i) {
-        int img = rd_u16(&buf[o]); SpriteGeo g;
-        g.isObject = buf[o + 2];
-        g.fx = rd_i16(&buf[o + 3]); g.fy = rd_i16(&buf[o + 5]);
-        g.fw = rd_u16(&buf[o + 7]); g.fh = rd_u16(&buf[o + 9]);
-        g.px = rd_i16(&buf[o + 11]); g.py = rd_i16(&buf[o + 13]);
-        o += 15; out[img] = g;
+    for (int i = 0; i < n; ++i) {
+        if (fsge) {
+            if (o + 15 > buf.size()) break;
+            int img = rd_u16(&buf[o]); SpriteGeo g;
+            g.mode = buf[o + 2] ? 1 : 0;
+            g.isObject = buf[o + 2];
+            g.fx = rd_i16(&buf[o + 3]); g.fy = rd_i16(&buf[o + 5]);
+            g.fw = rd_u16(&buf[o + 7]); g.fh = rd_u16(&buf[o + 9]);
+            g.px = rd_i16(&buf[o + 11]); g.py = rd_i16(&buf[o + 13]);
+            if (g.fw > 0) g.frames.push_back({g.fx, g.fy, g.fw, g.fh});
+            o += 15; out[img] = std::move(g);
+        } else {  // FSG2: img u16, mode u8, isObject u8, px i16, py i16, nframes u16, frames(x,y,w,h)
+            if (o + 10 > buf.size()) break;
+            int img = rd_u16(&buf[o]); SpriteGeo g;
+            g.mode = buf[o + 2]; g.isObject = buf[o + 3];
+            g.px = rd_i16(&buf[o + 4]); g.py = rd_i16(&buf[o + 6]);
+            int nf = rd_u16(&buf[o + 8]); o += 10;
+            for (int k = 0; k < nf && o + 8 <= buf.size(); ++k) {
+                SGFrame fr{ rd_i16(&buf[o]), rd_i16(&buf[o + 2]),
+                            rd_u16(&buf[o + 4]), rd_u16(&buf[o + 6]) };
+                g.frames.push_back(fr); o += 8;
+            }
+            if (!g.frames.empty()) {
+                g.fx = g.frames[0].x; g.fy = g.frames[0].y;
+                g.fw = g.frames[0].w; g.fh = g.frames[0].h;
+            }
+            out[img] = std::move(g);
+        }
     }
     return out;
 }

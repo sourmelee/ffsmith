@@ -100,7 +100,15 @@ struct LevelTable {                              // data/levels.bin (EXP thresho
 };
 LevelTable load_levels(const std::string& path);
 
-struct SpriteGeo { int isObject = 0, fx = 0, fy = 0, fw = 0, fh = 0, px = 0, py = 0; };  // field_anm per-sprite frame + anchor
+struct SGFrame { int x = 0, y = 0, w = 0, h = 0; };
+// Per-sprite field geometry (spritegeo.bin / FSG2), keyed by fldchr img id.
+// mode: 0 char (48x48 grid path), 1 static, 2 grid (in-sheet strip),
+//       3 multifile (frames are sibling fldchr{img}_{k} textures), 4 special.
+struct SpriteGeo {
+    int mode = 0, isObject = 0, px = 0, py = 0;
+    std::vector<SGFrame> frames;          // animation frames (>=1 for objects)
+    int fx = 0, fy = 0, fw = 0, fh = 0;   // back-compat mirror of frames[0]
+};
 std::unordered_map<int, SpriteGeo> load_spritegeo(const std::string& path);
 struct Spell { int id = 0, type = 0, mp = 0, power = 0, element = 0; std::string name; };  // type 0=dmg,1=heal; element mask (1=Fire 2=Ice 4=Thunder 16=Holy...)
 std::vector<Spell> load_spells(const std::string& path);  // data/spells.bin

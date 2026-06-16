@@ -19,6 +19,6 @@
 // badge, and keep ``project(FFSmith VERSION ...)`` in CMakeLists.txt in sync.
 //
 #define FFSMITH_VERSION_MAJOR 0
-#define FFSMITH_VERSION_MINOR 1
-#define FFSMITH_VERSION_PATCH 3
-#define FFSMITH_VERSION "0.1.3"
+#define FFSMITH_VERSION_MINOR 2
+#define FFSMITH_VERSION_PATCH 0
+#define FFSMITH_VERSION "0.2.0"

@@ -27,6 +27,31 @@ not this log.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-15
+
+### Fixed
+- **Field objects only auto-animate when flagged.** `drawSprite` now cycles
+  frames solely for `isObject==2` (ambient effects: fire/flames); state sheets
+  (`isObject==1`: doors/chests/props) hold frame 0, fixing 2-state doors that
+  flickered or drew their whole sheet. Grid/multifile frames are centred
+  bottom-on-tile by their own size (px/py baked 0); static keeps the legacy anchor.
+
+### Added
+- **Animated field-object sprites.** `SpriteGeo` now carries a per-sprite frame
+  list + `mode` (char / static / grid / multifile / special / battlechar), parsed
+  from the new `spritegeo.bin` **`FSG2`** format (`load_spritegeo` still reads the
+  old `FSGE` for back-compat). `Host::drawSprite` cycles grid/multifile frames at
+  ~7 fps: `grid` crops in-sheet rects, `multifile` swaps to sibling
+  `fldchr{img}_{k}` textures, each centred bottom-on-tile by its own size; `static`
+  keeps the legacy authored anchor (the `sprite_grid.json` contract).
+
+### Fixed
+- **Field objects no longer mis-aligned.** Geometry is keyed by sprite img id, so
+  doors / crystals / chests / effects draw their real frames instead of a
+  mis-keyed field_anm sub-rect. Battle-character sheets (fldchr30–49) are flagged
+  `battlechar` and routed to the 48×48 grid path rather than animating as props.
+
+
 ## [0.1.3] - 2026-06-15
 
 ### Added
