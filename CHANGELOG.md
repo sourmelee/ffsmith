@@ -37,7 +37,9 @@ not this log.
   from the `var`-selected texture and place it at `(tile-centre+px, tile-bottom+py)`
   using the baked FFD part offset. Sibling files are palette variants (no file-
   cycling); only `isObject==2` in-sheet effect strips animate — fixes large objects
-  (96×96 tree) sitting too far left and palette-flicker on multifile sprites.
+  (96×96 tree) sitting too far left and palette-flicker on multifile sprites. New `directional` sprite mode (6) for vehicles: `drawSprite`
+  picks the down/up/side frame by `facing` (RIGHT = side flipped), so the airship
+  turns with movement.
 
 ### Added
 - **Animated field-object sprites.** `SpriteGeo` now carries a per-sprite frame

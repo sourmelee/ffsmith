@@ -313,6 +313,23 @@ bool Host::drawSprite(int img, int var, int facing, int animCol, int lx, int ly,
     SDL_Texture* tex = spriteTex(img, var, tw, th);
     if (!tex) return false;
     auto git = spriteGeo_.find(img);                    // field objects: real frames + FFD part-offset anchor
+    if (git != spriteGeo_.end() && git->second.mode == 6 && !git->second.frames.empty()) {
+        // Directional vehicle (airship): frames = [down, up, side]; facing picks the
+        // view, RIGHT = side flipped. Anchor is the FFD part offset like other objects.
+        const SpriteGeo& g = git->second;
+        int nf = (int)g.frames.size();
+        int per = nf / 3 > 0 ? nf / 3 : 1;              // propeller frames per direction
+        int dirIdx = (facing == FACE_UP) ? 1 : (facing == FACE_DOWN) ? 0 : 2;
+        int prop = (per > 1) ? (int)((SDL_GetTicks() / 180u) % (Uint32)per) : 0;
+        int idx = dirIdx * per + prop;
+        if (idx >= nf) idx = idx % nf;
+        const SGFrame& fr = g.frames[idx];
+        SDL_RendererFlip flip = (facing == FACE_RIGHT) ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;
+        SDL_Rect osrc{ fr.x, fr.y, fr.w, fr.h };
+        SDL_Rect odst{ lx + tile / 2 + g.px, ly + tile + g.py, fr.w, fr.h };
+        SDL_RenderCopyEx(renderer_, tex, &osrc, &odst, 0.0, nullptr, flip);
+        return true;
+    }
     if (git != spriteGeo_.end() && git->second.isObject && !git->second.frames.empty()) {
         const SpriteGeo& g = git->second;
         int nf = (int)g.frames.size();
