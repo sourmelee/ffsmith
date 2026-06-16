@@ -33,8 +33,11 @@ not this log.
 - **Field objects only auto-animate when flagged.** `drawSprite` now cycles
   frames solely for `isObject==2` (ambient effects: fire/flames); state sheets
   (`isObject==1`: doors/chests/props) hold frame 0, fixing 2-state doors that
-  flickered or drew their whole sheet. Grid/multifile frames are centred
-  bottom-on-tile by their own size (px/py baked 0); static keeps the legacy anchor.
+  flickered or drew their whole sheet. Object draw is now one path: crop `frame[fi]`
+  from the `var`-selected texture and place it at `(tile-centre+px, tile-bottom+py)`
+  using the baked FFD part offset. Sibling files are palette variants (no file-
+  cycling); only `isObject==2` in-sheet effect strips animate — fixes large objects
+  (96×96 tree) sitting too far left and palette-flicker on multifile sprites.
 
 ### Added
 - **Animated field-object sprites.** `SpriteGeo` now carries a per-sprite frame

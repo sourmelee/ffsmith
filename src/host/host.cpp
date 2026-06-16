@@ -312,29 +312,17 @@ bool Host::drawSprite(int img, int var, int facing, int animCol, int lx, int ly,
     int tw = 0, th = 0;
     SDL_Texture* tex = spriteTex(img, var, tw, th);
     if (!tex) return false;
-    auto git = spriteGeo_.find(img);                    // object sprites (doors/crystals/chests/effects): real frames + anchor
+    auto git = spriteGeo_.find(img);                    // field objects: real frames + FFD part-offset anchor
     if (git != spriteGeo_.end() && git->second.isObject && !git->second.frames.empty()) {
         const SpriteGeo& g = git->second;
         int nf = (int)g.frames.size();
-        // Animate only isObject==2 (ambient effects: fire/flames); state sheets
-        // (doors/chests/props, isObject==1) hold frame 0 and never auto-cycle.
+        // Sibling files are PALETTE variants (the placement `var` already picked the
+        // texture); only isObject==2 (in-sheet effect strips: fire/flames) animates.
         int fi = (g.isObject == 2 && nf > 1) ? (int)((SDL_GetTicks() / 140u) % (Uint32)nf) : 0;
         const SGFrame& fr = g.frames[fi];
-        SDL_Texture* otex = tex;
         SDL_Rect osrc{ fr.x, fr.y, fr.w, fr.h };
-        if (g.mode == 3) {                              // multifile: this frame is a sibling texture
-            int mw = 0, mh = 0;
-            SDL_Texture* mt = spriteTex(img, fi, mw, mh);
-            if (mt) { otex = mt; osrc = SDL_Rect{ fr.x, fr.y, fr.w ? fr.w : mw, fr.h ? fr.h : mh }; }  // honour per-file crop (e.g. airship view cell)
-        }
-        int ax, ay;
-        if (g.mode == 1) {                              // static: legacy authored anchor (sprite_grid.json contract)
-            ax = lx + tile / 2 + g.px; ay = ly + tile + g.py;
-        } else {                                        // grid/multifile: centre-bottom each frame by its own size
-            ax = lx + tile / 2 - osrc.w / 2 + g.px; ay = ly + tile - osrc.h + g.py;
-        }
-        SDL_Rect odst{ ax, ay, osrc.w, osrc.h };
-        SDL_RenderCopy(renderer_, otex, &osrc, &odst);
+        SDL_Rect odst{ lx + tile / 2 + g.px, ly + tile + g.py, fr.w, fr.h };  // dst = tile bottom-centre + part offset
+        SDL_RenderCopy(renderer_, tex, &osrc, &odst);
         return true;
     }
     int sx = 0, sy = 0, cw = 48, ch = 48;
