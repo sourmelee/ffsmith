@@ -39,7 +39,7 @@ not this log.
   cycling); only `isObject==2` in-sheet effect strips animate — fixes large objects
   (96×96 tree) sitting too far left and palette-flicker on multifile sprites. New `directional` sprite mode (6) for vehicles: `drawSprite`
   picks the down/up/side frame by `facing` (RIGHT = side flipped), so the airship
-  turns with movement.
+  turns with movement; the propeller animates (2 frames per direction).
 
 ### Added
 - **Animated field-object sprites.** `SpriteGeo` now carries a per-sprite frame
