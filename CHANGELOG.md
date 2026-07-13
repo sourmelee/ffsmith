@@ -27,6 +27,36 @@ not this log.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-11
+
+### Added
+- **NPC auto-wander** (`Field::tickWander`) — the `FieldClass::MoveCharaAuto`
+  (c:115518) model: a `move_type`-2 NPC picks a uniformly-random direction among
+  those whose target tile stays **inside its event rect** (`GetPassFlags`
+  c:117339 low bits) and walks there; a collision-blocked pick only *turns* the
+  NPC (the hit bits' face command `0x10|dir`). Walk/pause cadence comes from the
+  `field_constant.dat` tables — walk `cfg[0x37+speed]` ticks/step, pause
+  `cfg[0x42+freq]` ticks (`CalcCharaAnimeSpeed` c:118074 / `SetCharaAction`
+  c:117759) — via the new `FieldConstant` loader (`data/field_constant.bin`,
+  decoded retail defaults compiled in). `move_type` 3 (wander-unbounded) is
+  supported but unused in retail data (all 370 wanderers are type 2).
+- **FFM6 loader** — per-event 7-byte NPC movement block (`move_type`, `facing0`,
+  `chflags`, `speed0`, `off_x`/`off_y`, `freq0`; `InitEventDataOfChara`
+  c:119752). NPC spawn tile is now `rect origin + offset` and initial facing is
+  applied (previously every NPC spawned at the rect origin facing down —
+  m500's ev18 was 4,2 tiles off).
+- **`--npctest` self-test** — synthetic-map wander verification: rect
+  confinement, wall/player-tile avoidance, field_constant cadence bounds,
+  `move_type`-1 NPCs never move (8 checks).
+- **`--fieldshot` accepts `--frames N`** — builds actors and ticks the field N
+  times before the capture, so wander/tile animation can advance headlessly.
+
+### Changed
+- **Talked-to NPCs turn to face the player** (SetCharaLookDir on talk; MEDIUM —
+  the exact original call site is unconfirmed). Only the engaged NPC stops
+  wandering in the original (`CheckEventActive`); FFSmith currently pauses all
+  wander while any script/dialogue is pending (approximation, flagged in code).
+
 ## [0.2.0] - 2026-06-15
 
 ### Fixed

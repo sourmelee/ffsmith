@@ -21,6 +21,16 @@ struct Event {
     int boot = 0;              // boot/appear condition (header[8])
     int img = -1, var = 0;     // chara sprite id + variant
     std::vector<uint8_t> appear;   // 31-byte appear-condition block (header[9..0x27]; FFM3)
+    // FFM6: NPC movement block (InitEventDataOfChara c:119752, header +0x35..+0x3b).
+    // move_type: 1 = stand, 2 = wander CONFINED TO THE EVENT RECT (GetPassFlags
+    // c:117339 rejects targets outside [x,x+w) x [y,y+h)), 3 = wander unbounded.
+    // Spawn tile = rect origin + (off_x, off_y).
+    int move_type = 0;         // header +0x35
+    int facing0 = 0;           // header +0x36 (0..3 = D/U/L/R)
+    int chflags = 0;           // header +0x37 (chara flags; EventOptionToCharaFlags)
+    int speed0 = 2;            // header +0x38 (walk-speed index 0..7)
+    int off_x = 0, off_y = 0;  // header +0x39/+0x3a (spawn offset from rect origin)
+    int freq0 = 2;             // header +0x3b (wander frequency 0..4)
     std::vector<std::vector<uint8_t>> scripts;  // length-split bytecode blocks
 };
 
@@ -52,6 +62,19 @@ std::unordered_map<int, std::unordered_map<int, int>> load_chipfloor(const std::
 FfMap   load_ffmap(const std::string& path);
 bool    save_tex(const std::string& path, const Texture& t);
 std::string find_map_key(const std::string& bundleDir, int mapId);  // resolve MapChange target
+
+// field_constant.dat (the GameClass+0x44c90 config block; baked verbatim as
+// data/field_constant.bin).  NPC movement timing (CalcCharaAnimeSpeed c:118074,
+// SetCharaAction c:117759): walk = cfg[0x37+speed] ticks per tile step (speed
+// clamped to [cfg[0x32], cfg[0x34]-1]); wander pause = cfg[0x42+freq] ticks
+// (freq clamped to [cfg[0x3f], cfg[0x40]-1]).  Defaults = decoded values from
+// the retail file so the engine works without the bake.
+struct FieldConstant {
+    std::vector<uint8_t> raw;
+    int walkDur(int spd) const;      // ticks per 1-tile walk step
+    int wanderWait(int freq) const;  // ticks between wander steps
+};
+FieldConstant load_field_constant(const std::string& path);
 
 struct Font {                       // baked bitmap-font atlas (text/font.tex + .meta)
     Texture atlas;

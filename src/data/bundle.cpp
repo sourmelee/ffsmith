@@ -99,9 +99,10 @@ FfMap load_ffmap(const std::string& path) {
     if (buf[3] >= '2' && o + 2 <= buf.size()) {  // FFM2/3/4 events block
         const bool hasAppear = (buf[3] >= '3');   // FFM3+: 31 appear bytes per event
         const bool hasRect = (buf[3] >= '4');     // FFM4: rect w,h after x,y
+        const bool hasNpcMove = (buf[3] >= '6');  // FFM6: 7-byte NPC movement block
         int ne = rd_u16(&buf[o]); o += 2;
         for (int e = 0; e < ne; ++e) {
-            if (o + (hasRect ? 44u : hasAppear ? 40u : 9u) > buf.size()) break;
+            if (o + (hasNpcMove ? 51u : hasRect ? 44u : hasAppear ? 40u : 9u) > buf.size()) break;
             Event ev;
             if (hasRect) { ev.id = rd_u16(&buf[o]); o += 2; }   // FFM4: event id first
             ev.x = buf[o]; ev.y = buf[o+1]; o += 2;
@@ -109,6 +110,11 @@ FfMap load_ffmap(const std::string& path) {
             ev.type = buf[o]; ev.boot = buf[o+1];
             ev.img = rd_i16(&buf[o+2]); ev.var = buf[o+4]; o += 5;
             if (hasAppear) { ev.appear.assign(buf.begin() + o, buf.begin() + o + 31); o += 31; }
+            if (hasNpcMove) {                     // FFM6 (InitEventDataOfChara header +0x35..+0x3b)
+                ev.move_type = buf[o]; ev.facing0 = buf[o+1]; ev.chflags = buf[o+2];
+                ev.speed0 = buf[o+3]; ev.off_x = buf[o+4]; ev.off_y = buf[o+5];
+                ev.freq0 = buf[o+6]; o += 7;
+            }
             int ns = rd_u16(&buf[o]); o += 2;
             for (int s = 0; s < ns; ++s) {
                 if (o + 2 > buf.size()) break;
@@ -449,6 +455,50 @@ std::unordered_map<int, SpriteGeo> load_spritegeo(const std::string& path) {
         }
     }
     return out;
+}
+
+// --- field_constant.dat (NPC movement timing) --------------------------------
+// Decoded defaults (retail field_constant.dat, 306 B): walk-duration table at
+// +0x37 = {44,30,14,6,4,22,8,6} ticks/step for speed 0..7 (clamp [cfg[0x32],
+// cfg[0x34]-1] per CalcCharaAnimeSpeed c:118074); wander-wait table at +0x42 =
+// {180,90,45,21,0} ticks for frequency 0..4 (SetCharaAction c:117759 duration
+// branch for wait commands, mask 0x68).
+static const uint8_t kWalkDurDefault[8] = {44, 30, 14, 6, 4, 22, 8, 6};
+static const uint8_t kWaitDurDefault[5] = {180, 90, 45, 21, 0};
+
+int FieldConstant::walkDur(int spd) const {
+    if (raw.size() >= 0x3f) {
+        int lo = raw[0x32], hi = raw[0x34] - 1;
+        if (spd < lo) spd = lo; if (spd > hi) spd = hi;
+        int d = raw[0x37 + spd];
+        return d > 0 ? d : 1;
+    }
+    if (spd < 0) spd = 0; if (spd > 7) spd = 7;
+    int d = kWalkDurDefault[spd];
+    return d > 0 ? d : 1;
+}
+
+int FieldConstant::wanderWait(int freq) const {
+    if (raw.size() >= 0x4a) {
+        int lo = raw[0x3f], hi = raw[0x40] - 1;
+        if (freq < lo) freq = lo; if (freq > hi) freq = hi;
+        return raw[0x42 + freq];
+    }
+    if (freq < 0) freq = 0; if (freq > 4) freq = 4;
+    return kWaitDurDefault[freq];
+}
+
+FieldConstant load_field_constant(const std::string& path) {
+    FieldConstant fc;
+    FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return fc;                       // missing file -> decoded defaults
+    std::fseek(f, 0, SEEK_END); long n = std::ftell(f); std::fseek(f, 0, SEEK_SET);
+    if (n > 0 && n < 4096) {
+        fc.raw.resize((size_t)n);
+        if (std::fread(fc.raw.data(), 1, (size_t)n, f) != (size_t)n) fc.raw.clear();
+    }
+    std::fclose(f);
+    return fc;
 }
 
 }  // namespace ffsmith

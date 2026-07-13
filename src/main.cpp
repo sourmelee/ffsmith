@@ -184,6 +184,60 @@ static int vmSelfTest() {
     return fails ? 1 : 0;
 }
 
+// --- NPC auto-wander self-test (--npctest): synthetic map, no bundle needed --
+// Verifies the MoveCharaAuto model: a move_type-2 NPC wanders, stays inside
+// its event rect, respects collision (wall + player tile), and issues steps at
+// the field_constant cadence; a move_type-1 NPC never moves.
+static int npcSelfTest() {
+    int fails = 0;
+    auto expect = [&](bool ok, const char* what) {
+        std::printf("[npctest] %-52s %s\n", what, ok ? "PASS" : "FAIL");
+        if (!ok) ++fails;
+    };
+    std::srand(12345);
+    FfMap m; m.w = 8; m.h = 8; m.n_layers = 1;
+    m.layers.emplace_back(64, (uint16_t)1);
+    m.pass.assign(64, 0x0f);
+    m.pass[4 * 8 + 4] = 0;                       // wall inside the wander rect
+    Event wanderer; wanderer.id = 1; wanderer.x = 2; wanderer.y = 2;
+    wanderer.w = 4; wanderer.h = 4;              // rect tiles [2..5]x[2..5]
+    wanderer.type = 0; wanderer.boot = 1; wanderer.img = 1;
+    wanderer.move_type = 2; wanderer.off_x = 1; wanderer.off_y = 1;   // spawn (3,3)
+    wanderer.speed0 = 2; wanderer.freq0 = 2; wanderer.facing0 = 2;    // faces LEFT
+    wanderer.scripts.push_back({0x57});
+    Event stander = wanderer; stander.id = 2; stander.x = 6; stander.y = 6;
+    stander.w = 1; stander.h = 1; stander.off_x = 0; stander.off_y = 0;
+    stander.move_type = 1; stander.facing0 = 0;
+    m.events.push_back(wanderer);
+    m.events.push_back(stander);
+    Field f(&m, 32, 0, 0);                       // player parked at (0,0)
+    f.enterMap();
+    const Actor& a = f.actors()[0];
+    const Actor& b = f.actors()[1];
+    expect(a.col == 3 && a.row == 3, "FFM6 spawn = rect origin + off_x/off_y");
+    expect(a.facing == FACE_LEFT, "FFM6 initial facing applied");
+    InputState in{};
+    int steps = 0, lc = a.col, lr = a.row;
+    bool inRect = true, offWall = true, offPlayer = true, standerStill = true;
+    for (int t = 0; t < 6000; ++t) {
+        f.update(in);
+        if (a.col != lc || a.row != lr) { ++steps; lc = a.col; lr = a.row; }
+        if (a.col < 2 || a.col > 5 || a.row < 2 || a.row > 5) inRect = false;
+        if (a.col == 4 && a.row == 4) offWall = false;
+        if (a.col == 0 && a.row == 0) offPlayer = false;
+        if (b.col != 6 || b.row != 6) standerStill = false;
+    }
+    expect(steps >= 10, "wanderer moved (>= 10 steps in 6000 ticks)");
+    expect(steps <= 115, "cadence honours the field_constant wait table");
+    expect(inRect, "wanderer stayed inside its event rect");
+    expect(offWall, "wanderer never entered the solid tile");
+    expect(offPlayer, "wanderer never entered the player tile");
+    expect(standerStill, "move_type-1 NPC never moved");
+    std::printf("[npctest] %s (%d failure%s)\n", fails ? "FAILED" : "ALL PASS",
+                fails, fails == 1 ? "" : "s");
+    return fails ? 1 : 0;
+}
+
 struct SaveData { bool ok = false; std::string map; int x = 0, y = 0, facing = 0, img = -1;
                   bool hasState = false; std::vector<GameMember> party; std::vector<InvSlot> inv; int gil = 0;
                   std::vector<uint8_t> script;
@@ -323,6 +377,7 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--cuttest")) cutTest = true;
         else if (!std::strcmp(a, "--encounters")) encountersOn = true;
         else if (!std::strcmp(a, "--vmtest")) return vmSelfTest();
+        else if (!std::strcmp(a, "--npctest")) return npcSelfTest();
         else if (!std::strcmp(a, "--setflag")) setFlags.push_back(takeStr(argc, argv, i, ""));
         else if (!std::strcmp(a, "--intro")) introBeat = takeInt(argc, argv, i, 0);
         else if (!std::strcmp(a, "--no-overhead")) noOverhead = true;
@@ -385,6 +440,9 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    // NPC movement timing tables (baked verbatim from field_constant.dat;
+    // decoded defaults compiled in if the bundle predates FFM6).
+    Field::setFieldConstant(load_field_constant(bundle + "/data/field_constant.bin"));
     std::unique_ptr<Field> field = std::make_unique<Field>(&m, tile, startCol, startRow);
     if (loadedFacing >= 0) field->setFacing(loadedFacing);
     std::string curMap = map;
@@ -568,6 +626,13 @@ int main(int argc, char** argv) {
     if (introBeat >= 0) { host.loadTitle(bundle); host.loadIntro(bundle); host.setIntroState(introBeat); host.setMode(Host::Mode::Intro); }
     if (!fieldshot.empty()) {
         if (face >= 0) { InputState in; in.held = (uint32_t)(face==0?BTN_DOWN:face==1?BTN_UP:face==2?BTN_LEFT:BTN_RIGHT); field->update(in); }
+        // --frames N with --fieldshot: build actors + tick the field N times
+        // first (lets NPC wander / tile animation advance before the capture).
+        if (cfg.max_frames > 0) {
+            field->enterMap();
+            InputState idle{};
+            for (int t = 0; t < cfg.max_frames; ++t) field->update(idle);
+        }
         bool ok = host.shotField(fieldshot);
         std::printf("[FFSmith] field shot %s -> %s\n", ok ? "ok" : "FAILED", fieldshot.c_str());
         return ok ? 0 : 1;

@@ -35,6 +35,19 @@ struct Actor {
     int speed = 2;                   // px/tick
     int waitTicks = 0;
     std::vector<uint8_t> cmds; size_t cmdIdx = 0;
+    // NPC auto-wander (FieldClass::MoveCharaAuto c:115518): move_type 2 =
+    // wander confined to the event rect, 3 = unbounded.  When idle, pick a
+    // random direction among those whose target stays in the rect; a
+    // collision-blocked pick just TURNS the NPC (GetPassFlags hit bits ->
+    // face command 0x10|dir).  Cadence: walk step (field_constant walk-dur)
+    // then wanderWait ticks (field_constant wait table by frequency; max
+    // frequency = no pause).  Only the NPC whose event is running stops
+    // (CheckEventActive c:138435); engine approximation pauses all wander
+    // while a script/dialogue is pending.
+    int moveType = 0;                // event move_type (header +0x35)
+    int wSpeed = 2, wFreq = 2;       // walk-speed / frequency indexes
+    int homeX = 0, homeY = 0, homeW = 1, homeH = 1;  // event rect = wander bounds
+    int wanderWait = 0;              // ticks until the next wander think
     bool active() const { return moving || waitTicks > 0 || fade != 0 || cmdIdx < cmds.size(); }
     int pixelX(int tile) const { return col * tile + (moving ? dx * prog : 0); }
     int pixelY(int tile) const { return row * tile + (moving ? dy * prog : 0); }
@@ -88,6 +101,9 @@ public:
         Warp w = warp_; warp_ = Warp{}; return w;
     }
     void setNoClip(bool b) { noClip_ = b; }     // debug: ignore collision
+    // NPC wander timing tables (data/field_constant.bin; decoded defaults
+    // compiled in).  Static: one config per game, set once at startup.
+    static void setFieldConstant(const FieldConstant& fc);
     bool noClip() const { return noClip_; }
     void setFacing(int f) { if (f >= 0 && f < 4) facing_ = f; }
     void openMessage(int id, int count = 1) {    // debug/scripted: open dialogue at msg id..id+count-1
@@ -125,6 +141,8 @@ private:
     void runScript(const Event* e, int startBlock);   // run VM + absorb VMOut
     void buildActors();
     void tickActors();
+    void tickWander(Actor& a);                   // MoveCharaAuto approximation
+    bool wanderBlocked(int c, int r) const;      // collision incl. player tile
     void tickWaits();
     bool stepActorCommand(Actor& a);             // false = command was instant
     void applyCommandTo(Actor& a, int cmd);      // shared command interpreter

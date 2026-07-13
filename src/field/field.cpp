@@ -8,6 +8,10 @@ namespace ffsmith {
 static const int DX[4] = {0, 0, -1, 1};  // DOWN, UP, LEFT, RIGHT
 static const int DY[4] = {1, -1, 0, 0};
 
+// NPC movement timing (data/field_constant.bin; decoded defaults built in).
+static FieldConstant g_fieldConst;
+void Field::setFieldConstant(const FieldConstant& fc) { g_fieldConst = fc; }
+
 Field::Field(const FfMap* map, int tile, int startCol, int startRow)
     : map_(map), tile_(tile > 0 ? tile : 32), col_(startCol), row_(startRow) {}
 
@@ -263,8 +267,12 @@ void Field::buildActors() {
         const Event& e = map_->events[i];
         Actor a;
         a.evIndex = (int)i; a.id = e.id;
-        a.col = e.x; a.row = e.y;
-        a.facing = FACE_DOWN;
+        // FFM6: spawn = rect origin + offset; rect = wander bounds
+        // (InitEventDataOfChara: x = rec[2]+rec[0x39], y = rec[3]+rec[0x3a]).
+        a.col = e.x + e.off_x; a.row = e.y + e.off_y;
+        a.facing = (e.facing0 >= 0 && e.facing0 < 4) ? e.facing0 : FACE_DOWN;
+        a.moveType = e.move_type; a.wSpeed = e.speed0; a.wFreq = e.freq0;
+        a.homeX = e.x; a.homeY = e.y; a.homeW = e.w; a.homeH = e.h;
         actors_.push_back(a);
     }
 }
@@ -343,6 +351,7 @@ void Field::tickActors() {
             applyCommandTo(a, cmd);
             if (a.moving || a.waitTicks > 0 || a.fade != 0) break;
         }
+        if (!a.active()) tickWander(a);                    // NPC auto-wander when idle
     }
     // scripted player commands (0x68 fallback)
     if (playerWait_ > 0) { --playerWait_; }
@@ -361,6 +370,48 @@ void Field::tickActors() {
         else if (cmd == 0x0b) playerWait_ = tile_ / 2;
         else if (cmd == 0x45) playerWait_ = tile_;
     }
+}
+
+// NPC step collision: map pass grid + other actors (isSolid) + the player's
+// current and in-flight tile (original: CheckMovePass GetCharaOfPosition +
+// MoveCharaPassiveHit player checks).
+bool Field::wanderBlocked(int c, int r) const {
+    if (isSolid(c, r)) return true;
+    if (c == col_ && r == row_) return true;
+    if (moving_ && c == tcol_ && r == trow_) return true;
+    return false;
+}
+
+// FieldClass::MoveCharaAuto (c:115518) approximation.  Differences from the
+// original, flagged MEDIUM: (1) the original stops only the NPC whose event is
+// active (CheckEventActive); we pause ALL wander while any script/dialogue is
+// pending so 0x69 actor-waits can settle.  (2) a blocked pick gets the same
+// wander pause as a walk (the original's face-command duration is undecoded).
+void Field::tickWander(Actor& a) {
+    if (a.moveType < 2) return;                       // 0/1 = stand
+    if (dlgActive_ || choiceActive_ || sentenceActive_ || scriptPaused()) return;
+    if (a.evIndex < 0 || a.evIndex >= (int)map_->events.size()) return;
+    const Event& e = map_->events[a.evIndex];
+    if (e.img <= 0 || !a.visible || !appears(e)) return;
+    if (a.wanderWait > 0) { --a.wanderWait; return; }
+    // candidate dirs: target stays inside the event rect (move_type 2 only;
+    // GetPassFlags c:117339 low bits) -- blocked dirs stay candidates.
+    int cand[4], n = 0;
+    for (int d = 0; d < 4; ++d) {
+        int nc = a.col + DX[d], nr = a.row + DY[d];
+        if (a.moveType == 2 && (nc < a.homeX || nc >= a.homeX + a.homeW ||
+                                nr < a.homeY || nr >= a.homeY + a.homeH)) continue;
+        cand[n++] = d;
+    }
+    a.wanderWait = g_fieldConst.wanderWait(a.wFreq);
+    if (!n) return;                                   // boxed in: wait (cmd 0x0b)
+    int d = cand[std::rand() % n];                    // Rand(popcount) pick
+    int nc = a.col + DX[d], nr = a.row + DY[d];
+    a.facing = d;                                     // face the pick either way
+    if (wanderBlocked(nc, nr)) return;                // hit bit set: turn only
+    a.dx = DX[d]; a.dy = DY[d];
+    a.tcol = nc; a.trow = nr; a.prog = 0; a.moving = true;
+    a.speed = std::max(1, tile_ / g_fieldConst.walkDur(a.wSpeed));
 }
 
 void Field::tickWaits() {
@@ -416,6 +467,11 @@ void Field::confirm() {
     }
     if (moving_) return;
     const Event* e = npcAt(col_ + DX[facing_], row_ + DY[facing_]);
+    if (e) {                                // talked-to NPC turns to the player
+        for (auto& a : actors_)             // (SetCharaLookDir on talk; MEDIUM)
+            if (a.evIndex >= 0 && &map_->events[a.evIndex] == e && !a.moving)
+                a.facing = facing_ ^ 1;     // pair-flip D<->U / L<->R
+    }
     if (!e) {                               // boot 8 = confirm while inside the rect
         for (const auto& ev : map_->events)
             if (ev.boot == 8 && !ev.scripts.empty() && inRect(ev, col_, row_) && appears(ev)) {

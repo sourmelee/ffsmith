@@ -1,6 +1,6 @@
 # FFSmith — Engine State Report
 
-*Audit snapshot 2026-06-10 (commit `d2aacc2`, 34 commits since 2026-06-01); data-table completion (real spell/item/job tables) added 2026-06-13; N2 job-stat derivation added 2026-06-14. This is the authoritative "where is the engine actually at" document. Confidence: HIGH = verified in code + self-test; MEDIUM = implemented but approximated or unverified against the original; LOW = guess/placeholder.*
+*Audit snapshot 2026-06-10 (commit `d2aacc2`, 34 commits since 2026-06-01); data-table completion (real spell/item/job tables) added 2026-06-13; N2 job-stat derivation added 2026-06-14; N4 NPC auto-wander added 2026-07-11 (0.3.0). This is the authoritative "where is the engine actually at" document. Confidence: HIGH = verified in code + self-test; MEDIUM = implemented but approximated or unverified against the original; LOW = guess/placeholder.*
 
 ## Ground-truth references (2026-06-14)
 
@@ -8,7 +8,7 @@ Shared engine systems are now disambiguated against **two** decompiles. **Primar
 
 ## Maturity summary
 
-FFSmith is **~10 days old and already plays a vertical slice of the real game**: title menu → New Game → intro cinematics → the retail opening cutscene chain (m0 → m101 → m100 → m101 → m200 → m1 → m300, ending at the scripted prologue battle) → walkable fields with real tiles/collision/sprites/animation/z-order → menus (Item/Equip/Status with real data and working actions) → turn-based ATB battles with real stats, rewards, level-ups → save/load. Since the 2026-06-10 battle-RE pass, **scripted battles work end-to-end** (`0x50` → real formation from `encounters.bin` → script resume, `--enctest` PASS) with real decoded monster stats (FMN2), and decoded random-encounter areas ship behind `--encounters` (approx roll). Still missing for story-playability: `bsc.dat` battle scripts, AP/abilities, shops, NPC movement, and the perspective world-map renderer.
+FFSmith is **~10 days old and already plays a vertical slice of the real game**: title menu → New Game → intro cinematics → the retail opening cutscene chain (m0 → m101 → m100 → m101 → m200 → m1 → m300, ending at the scripted prologue battle) → walkable fields with real tiles/collision/sprites/animation/z-order → menus (Item/Equip/Status with real data and working actions) → turn-based ATB battles with real stats, rewards, level-ups → save/load. Since the 2026-06-10 battle-RE pass, **scripted battles work end-to-end** (`0x50` → real formation from `encounters.bin` → script resume, `--enctest` PASS) with real decoded monster stats (FMN2), and decoded random-encounter areas ship behind `--encounters` (approx roll). Since 2026-07-11 (0.3.0) **towns are alive**: NPC auto-wander (`MoveCharaAuto` model, FFM6 movement block + `field_constant.bin` timing) is decoded-and-faithful, verified by `--npctest` and a live m500 run. Still missing for story-playability: `bsc.dat` battle scripts, AP/abilities, shops, and the perspective world-map renderer.
 
 ## Milestone ledger
 
@@ -25,6 +25,7 @@ FFSmith is **~10 days old and already plays a vertical slice of the real game**:
 | M8 audio | ✅ MEDIUM | per-map field/battle BGM, title BGM, "decide" SE; `titleBgm_ = 18` is an unconfirmed placeholder (host.h:149) |
 | Post-M8 Event VM v2 | ✅ HIGH | branching (`0x3d` if-not-goto), flags/vars banks, appear conditions, choices (`0x3c`), CallEvent (`0x66`), auto events, common pool — `--vmtest` 11/11 |
 | Post-M8 Scripted battles (N1) | ✅ HIGH | `0x50` decoded + implemented: formation tables (FENC), real monster stats (FMN2), VM pause → battle → resume, result via GetReference t8 — `--enctest` PASS |
+| Post-M8 NPC auto-wander (N4a) | ✅ HIGH (core) | `MoveCharaAuto` decoded + `Field::tickWander`: rect-confined random walk, blocked picks turn, field_constant cadence, FFM6 spawn offset/facing — `--npctest` 8/8, m500 live-verified. Approximation tail in movement.md (global wander pause, face-cmd duration) |
 
 ## What is real vs approximated
 
@@ -49,6 +50,7 @@ is the full FFD set (Magic/Job stubbed), with a Formation tab + active-party pan
 - **Warp fade recovery (2026-06-14):** a door/map warp that followed a fade-out now ramps the fade back in (the script's fade-in half is lost because warps run outside the VM), guarded by `fadeGen()` so genuine cutscene blacks are kept.
 
 ### Approximated / heuristic (MEDIUM — flagged in code comments)
+- **NPC wander pause scope**: the original stops only the NPC whose event is active (`CheckEventActive`); FFSmith pauses all wander while any script/dialogue is pending (protects `0x69` actor-waits). Blocked-pick turns reuse the wander pause (face-command duration undecoded). `MoveCharaPassiveHit` touch-boots unported.
 - **ATB**: gauge += SPD per step, threshold 256, random initial stagger (`pickNextActor`). Original turn scheduler not decoded.
 - **Magic**: the spell *table* is now **real decoded data** (0.7.27 — 251 spells with MP=body[7], power=body[19], type/element from the magic body; `spells.bin` FSPL). Still approximated: spell *knowledge* gate = `INT≥2`/`MND≥2` (no learned-ability slots yet) and the damage *application* `power + INT·3 − def/4 ± rand(4)` — NOT the decoded `CalcMagicDmg` formula. Status/buff spells aren't baked (no status system).
 - **Damage formula tail**: crit/element/race/status/hit-count/back-attack/defense% modifiers absent. (Resolved 2026-06-14: the job-derived attack stat `A` and the other four attributes now come from `SetJobStatus` -- `memberStat()` = `base_stat[level]*jobPct/100`, FLVL base[] + FJOB; raw-STR `A` retired. Equip/ability stat bonuses still omitted; enemy `W` = monster body[15].)

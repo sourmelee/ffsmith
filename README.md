@@ -1,6 +1,6 @@
 # FFSmith
 
-[![version](https://img.shields.io/badge/version-0.2.0-blue.svg)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.3.0-blue.svg)](CHANGELOG.md)
 
 Clean-room reimplementation of the **Final Fantasy Dimensions / Final Fantasy Legends** engine, in C++17. The working name nods to the engine's own `Mtx` ("Matrix") middleware.
 
@@ -99,7 +99,7 @@ collision overlay, **F4** HUD, **-/+** zoom, **B** test battle. The HUD shows `m
 A window opens; **arrows / WASD** walk the player (yellow marker), the camera
 follows, **Esc** quits. Big maps make big windows — use `--scale 1` or `2`.
 
-Headless options (no window): `--shot out.tex` writes the composed map; `--walk URDL...` prints the player's tile path for a scripted move sequence.
+Headless options (no window): `--shot out.tex` writes the composed map; `--walk URDL...` prints the player's tile path for a scripted move sequence; `--fieldshot out.tex` captures a rendered field frame (add `--frames N` to let NPC wander / tile animation run N ticks first); `--npctest` runs the NPC auto-wander self-test on a synthetic map (no bundle needed).
 
 On Windows, keep `SDL2.dll` next to `ffsmith.exe`.
 
